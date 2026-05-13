@@ -10,6 +10,7 @@ from app.api.response import ApiResponse, status_to_code
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    # 코드에서 직접 발생시키는 HTTP 예외
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         body = ApiResponse.fail(
@@ -19,6 +20,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         return JSONResponse(status_code=exc.status_code, content=body.model_dump())
 
+    # Pydantic 요청 검증 실패 예외
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         first_error = exc.errors()[0] if exc.errors() else {}
