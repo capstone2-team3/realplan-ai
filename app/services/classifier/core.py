@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from app.core.config import OPENAI_API_KEY, OPENAI_MODEL
+from app.core.config import OPENAI_API_KEY
+from app.services.classifier.constants import DEFAULT_OPENAI_MODEL
 from app.services.classifier.personalization import (
     NoOpPersonalization,
     PersonalizationLayer,
@@ -49,7 +50,7 @@ def _build_messages(inp: ClassifyInput) -> list[dict]:
 def classify_task(
     inp: ClassifyInput,
     client=None,
-    model: str = OPENAI_MODEL,
+    model: str = DEFAULT_OPENAI_MODEL,
     personalization: Optional[PersonalizationLayer] = None,
 ) -> ClassifyOutput:
     if personalization is None:

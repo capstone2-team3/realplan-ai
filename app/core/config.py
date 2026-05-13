@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # 환경변수에서 OpenAI API Key 가져옴. 없으면 None 반환.
 
-OPENAI_API_KEY: str | None = os.environ.get("OPENAI_API_KEY")
-OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+if OPENAI_API_KEY is None:
+    raise ValueError("OPENAI_API_KEY 환경 변수가 설정되어 있지 않습니다.")

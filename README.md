@@ -18,7 +18,8 @@ Swagger UI: http://localhost:8000/docs
 | 키 | 설명 | 기본값 |
 |---|---|---|
 | `OPENAI_API_KEY` | OpenAI API 키 (필수, /classify에서 사용) | — |
-| `OPENAI_MODEL` | 분류용 모델명 | `gpt-4o-mini` |
+
+분류용 기본 모델은 `app/services/classifier/constants.py`에서 관리합니다.
 
 ## 엔드포인트
 
@@ -66,6 +67,13 @@ tests/                   # pytest
 ```bash
 uv run pytest
 ```
+
+## 코드 분석 가이드
+
+처음 합류한 사람이 코드 구조와 읽는 순서를 빠르게 잡을 수 있도록
+[`docs/CODE_ANALYSIS_GUIDE.md`](docs/CODE_ANALYSIS_GUIDE.md)에 온보딩 가이드를 정리했습니다.
+
+백엔드 연동용 API 명세는 [`docs/API_SPEC.md`](docs/API_SPEC.md)에 정리했습니다.
 
 ## 핵심 모델
 
