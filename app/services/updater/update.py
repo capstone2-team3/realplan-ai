@@ -1,4 +1,8 @@
-"""완료 태스크 기반 계수 업데이트 계산."""
+"""완료 태스크 기반 계수 업데이트 계산.
+
+이 모듈은 `/v1/update`의 계산 결과만 만든다. 실제 history 저장, count 증가,
+Ridge 재학습 실행 여부 처리는 Spring 백엔드가 응답 payload를 보고 수행한다.
+"""
 
 from __future__ import annotations
 
@@ -33,6 +37,8 @@ def update_coefficients(req: UpdateRequest) -> dict:
     task = req.completed_task
     coefficients = req.coefficients
     counts = req.counts
+
+    # predict와 동일한 기준으로 태스크/계수/count의 도메인 유효성을 확인한다.
     _validate_task_common(
         task.estimated_minutes,
         task.difficulty,
@@ -48,11 +54,13 @@ def update_coefficients(req: UpdateRequest) -> dict:
     stage = _select_prediction_stage(counts.total_completed)
     ratio = task.actual_minutes / task.estimated_minutes
     log_ratio = math.log(ratio)
+    # 단일 이상치가 EMA 계수를 크게 흔들지 않도록 관측 logRatio를 제한한다.
     clamped_log_ratio = _clip(log_ratio, OBSERVATION_LOG_MIN, OBSERVATION_LOG_MAX)
     keys = _keys(task.folder_id, task.difficulty, task.task_type)
 
     updated_terms: list[dict] = []
     if stage == STAGE_EARLY:
+        # EARLY 단계만 온라인 EMA 업데이트를 반환하고, 이후 단계는 history 재학습을 기다린다.
         updated_terms = _update_early_terms(
             coefficients,
             counts,
@@ -80,6 +88,8 @@ def _update_early_terms(
     keys: TaskKeys,
     clamped_log_ratio: float,
 ) -> list[dict]:
+    """초기 단계의 global/type 로그 계수를 EMA 방식으로 갱신한다."""
+
     old_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
     if old_global is None:
         old_global = math.log(coefficients.global_multiplier)
@@ -119,6 +129,8 @@ def _observation(task: Any, ratio: float, log_ratio: float, clamped_log_ratio: f
 
 
 def _history_record(task: Any, log_ratio: float) -> dict:
+    """Spring이 그대로 저장할 수 있는 raw 학습 이력 포맷을 만든다."""
+
     return {
         "task_id": task.task_id,
         "estimated_minutes": task.estimated_minutes,
@@ -132,6 +144,8 @@ def _history_record(task: Any, log_ratio: float) -> dict:
 
 
 def _retrain_required(stage: str, completed_since_last_train: int) -> bool:
+    """현재 완료 건을 append한 뒤 Ridge 재학습을 요청해야 하는지 판단한다."""
+
     after_append = completed_since_last_train + 1
     if stage == STAGE_MAIN_EFFECT:
         return after_append >= MAIN_EFFECT_RETRAIN_INTERVAL
@@ -141,6 +155,8 @@ def _retrain_required(stage: str, completed_since_last_train: int) -> bool:
 
 
 def _count_increments(folder_id: int, difficulty: str, task_type: str) -> dict:
+    """Spring 저장소의 count map에 더할 key별 증가량을 만든다."""
+
     keys = _keys(folder_id, difficulty, task_type)
     return {
         "totalCompleted": 1,

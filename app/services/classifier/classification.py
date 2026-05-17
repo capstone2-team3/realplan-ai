@@ -34,6 +34,8 @@ def _build_user_prompt(inp: ClassifyInput) -> str:
 
 
 def _build_messages(inp: ClassifyInput) -> list[dict]:
+    """system prompt, few-shot 예시, 사용자 입력을 OpenAI chat messages로 구성한다."""
+
     msgs: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for ex in FEW_SHOT_EXAMPLES:
         msgs.append({"role": "user", "content": f"태스크 이름: {ex['input']}"})
@@ -53,10 +55,13 @@ def classify_task(
     model: str = DEFAULT_OPENAI_MODEL,
     personalization: Optional[PersonalizationLayer] = None,
 ) -> ClassifyOutput:
+    """과거 이력 매칭을 먼저 시도하고, 없으면 LLM으로 태스크 유형을 분류한다."""
+
     if personalization is None:
         personalization = NoOpPersonalization()
 
     if inp.user_history:
+        # 같은 사용자의 유사 태스크는 기존 분류를 따라가야 학습 계수가 흔들리지 않는다.
         matched = personalization.find_similar_classification(inp.name, inp.user_history)
         if matched is not None:
             return ClassifyOutput(
@@ -69,6 +74,7 @@ def classify_task(
     if client is None:
         from openai import OpenAI
 
+        # 테스트에서는 fake client를 주입하고, 운영에서는 여기서 실제 client를 만든다.
         client = OpenAI(api_key=OPENAI_API_KEY)
 
     response = client.chat.completions.create(

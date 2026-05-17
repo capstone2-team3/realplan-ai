@@ -1,4 +1,8 @@
-"""계수 조회와 prior 계산."""
+"""계수 조회와 prior 계산.
+
+Spring payload는 신규 map 기반 계수와 과거 scalar 계수가 섞여 들어올 수 있다.
+이 모듈은 두 형식을 같은 방식으로 읽고, 학습 전에는 보수적인 prior를 제공한다.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +29,8 @@ def _mapped_or_scalar(
     key: str,
     legacy_scalar_name: str | None = None,
 ) -> float | None:
+    """map 계수를 우선 읽고, 없으면 legacy scalar 계수를 fallback으로 읽는다."""
+
     value = getattr(coefficients, attr_name, None)
     if isinstance(value, dict):
         mapping = _as_mapping(value)
@@ -42,6 +48,8 @@ def _mapped_or_scalar(
 
 
 def _encoding_references(coefficients: CoefficientsPayload) -> dict[str, str | None]:
+    """Ridge 학습 시 제외한 reference category 메타데이터를 정규화한다."""
+
     references = getattr(coefficients, "references", None)
     if isinstance(references, dict):
         return {str(key): (str(value) if value is not None else None) for key, value in references.items()}
@@ -56,6 +64,8 @@ def _coefficient_or_reference_zero(
     legacy_scalar_name: str | None = None,
     prior: float = 0.0,
 ) -> tuple[float, bool]:
+    """계수가 reference category인지 확인하고, 없으면 prior로 보정한다."""
+
     if reference_key is not None and key == reference_key:
         return 0.0, True
 

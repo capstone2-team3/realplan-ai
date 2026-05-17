@@ -82,6 +82,7 @@ def compute_importance(task: CandidateTask) -> float:
     priority_factor = PRIORITY_WEIGHT.get(task.user_priority, 1.0)
     duration_factor = task.corrected_min / 60.0
 
+    # 점수는 절대값보다 후보 간 상대 비교용이다. 긴 태스크는 상한을 둬 과도한 쏠림을 막는다.
     score = (
         W_URGENCY * urgency
         + W_PRIORITY * priority_factor * 0.5
@@ -117,6 +118,7 @@ def _expand_candidates(
         full_score = compute_importance(task)
         items: list[_KnapsackItem] = []
 
+        # 전체 수행이 가용시간 안에 들어올 때만 전체 후보를 만든다.
         if task.corrected_min <= available_min:
             items.append(_KnapsackItem(
                 task_id=task.task_id,
@@ -168,6 +170,7 @@ def _solve_knapsack(
     for i in range(1, n + 1):
         group = groups[i - 1]
         for w in range(capacity_min + 1):
+            # 기본 선택지는 현재 task 그룹을 건너뛰는 것이다.
             best_value = dp[i - 1][w]
             best_choice = -1
 
@@ -183,6 +186,7 @@ def _solve_knapsack(
 
     selected: list[_KnapsackItem] = []
     w = capacity_min
+    # choice 테이블을 뒤에서부터 따라가며 실제 선택된 후보를 복원한다.
     for i in range(n, 0, -1):
         j = choice[i][w]
         if j >= 0:

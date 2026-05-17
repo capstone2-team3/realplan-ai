@@ -1,4 +1,7 @@
-"""예측/업데이트 요청 검증."""
+"""예측/업데이트 요청 검증.
+
+Pydantic이 타입을 검증한 뒤에도 모델 계산에 필요한 도메인 제약은 별도로 확인한다.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +17,8 @@ def _validate_task_common(
     coefficients: CoefficientsPayload,
     counts: CountsPayload,
 ) -> None:
+    """predict와 update가 공유하는 태스크/계수/count 검증."""
+
     if estimated_minutes <= 0:
         raise CalculationError("INVALID_ESTIMATED_MINUTES", "estimatedMinutes는 0보다 커야 합니다.")
     if coefficients.global_multiplier <= 0:

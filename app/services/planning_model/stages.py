@@ -1,4 +1,7 @@
-"""예측 단계와 clipping 정책."""
+"""예측 단계와 clipping 정책.
+
+완료 건수에 따라 사용할 모델 복잡도를 키우고, 단계별 log 보정 범위를 제한한다.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,8 @@ def _clip(x: float, lo: float, hi: float) -> float:
 
 
 def _select_prediction_stage(total_completed: int) -> str:
+    """누적 완료 건수로 EARLY/MAIN_EFFECT/INTERACTION 단계를 선택한다."""
+
     if total_completed < 50:
         return STAGE_EARLY
     if total_completed < 200:
@@ -37,4 +42,6 @@ def _log_policy(stage: str) -> tuple[float, float]:
 
 
 def _shrinkage(count: int) -> float:
+    """표본 수가 적은 계수의 영향력을 완만하게 낮춘다."""
+
     return count / (count + SHRINKAGE_DENOMINATOR)

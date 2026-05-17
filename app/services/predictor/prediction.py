@@ -1,4 +1,8 @@
-"""Spring 연동 소요시간 예측 계산."""
+"""Spring 연동 소요시간 예측 계산.
+
+이 모듈은 `/v1/predict`의 실제 계산만 담당한다. DB 조회나 계수 저장은 하지 않고,
+Spring이 넘겨준 현재 태스크의 계수와 count만 사용해 보정된 예상 시간을 반환한다.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +34,8 @@ def calculate_prediction(req: PredictRequest) -> dict:
     task = req.task
     coefficients = req.coefficients
     counts = req.counts
+
+    # API 스키마가 타입을 보장하더라도, 도메인상 허용하지 않는 값은 여기서 막는다.
     _validate_task_common(
         task.estimated_minutes,
         task.difficulty,
@@ -42,6 +48,7 @@ def calculate_prediction(req: PredictRequest) -> dict:
     keys = _keys(task.folder_id, task.difficulty, task.task_type)
     legacy_keys = _legacy_keys(task.folder_id, task.difficulty, task.task_type)
 
+    # 완료 이력이 적은 EARLY 단계는 Ridge 계수보다 prior와 EMA 계수를 더 신뢰한다.
     if stage == STAGE_EARLY:
         raw_log_correction, used_terms = _calculate_early_log_correction(
             coefficients,
@@ -60,6 +67,7 @@ def calculate_prediction(req: PredictRequest) -> dict:
             task.task_type,
         )
         if stage == STAGE_INTERACTION:
+            # 상호작용항은 충분히 관측된 조합만 추가해 과적합을 줄인다.
             raw_log_correction += _append_interaction_terms(
                 used_terms,
                 coefficients,
@@ -96,6 +104,12 @@ def _calculate_early_log_correction(
     difficulty: str,
     task_type: str,
 ) -> tuple[float, list[dict]]:
+    """초기 단계 보정값을 계산한다.
+
+    global 계수는 항상 반영하고, taskType 계수는 관측 수에 따른 shrinkage를 곱한다.
+    difficulty는 학습 데이터가 적을 때도 안정적인 기본 prior로 보정한다.
+    """
+
     log_alpha_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
     if log_alpha_global is None:
         log_alpha_global = math.log(coefficients.global_multiplier)
@@ -128,6 +142,8 @@ def _calculate_main_effect_log_correction(
     difficulty: str,
     task_type: str,
 ) -> tuple[float, list[dict]]:
+    """주효과 단계의 intercept/type/difficulty/folder 항을 합산한다."""
+
     used_terms: list[dict] = []
     references = _encoding_references(coefficients)
 
@@ -158,6 +174,7 @@ def _calculate_main_effect_log_correction(
             prior,
         )
         reliability = _shrinkage(count)
+        # reference category는 intercept에 이미 흡수되어 있으므로 contribution은 0이다.
         contribution = 0.0 if is_reference else (reliability * learned) + ((1 - reliability) * prior)
         log_correction += contribution
         used_terms.append(_term(term, key, learned, reliability, contribution))
@@ -171,6 +188,8 @@ def _append_interaction_terms(
     counts: CountsPayload,
     keys: TaskKeys,
 ) -> float:
+    """충분히 관측된 상호작용항만 usedTerms에 추가하고 합계를 반환한다."""
+
     total = 0.0
     references = _encoding_references(coefficients)
     candidates = (

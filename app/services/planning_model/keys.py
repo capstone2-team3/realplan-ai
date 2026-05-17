@@ -1,4 +1,7 @@
-"""예측 계수 term key 생성 유틸리티."""
+"""예측 계수 term key 생성 유틸리티.
+
+Spring 저장소와 Python 계산 로직이 같은 key 규칙을 공유해야 count와 계수가 맞물린다.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +21,8 @@ class TaskKeys:
 
 
 def _keys(folder_id: int, difficulty: str, task_type: str) -> TaskKeys:
+    """현재 태스크에 대응하는 v2.1 표준 key를 만든다."""
+
     folder = f"folder:{folder_id}"
     difficulty_key = f"difficulty:{difficulty}"
     task_type_key = f"taskType:{task_type}"

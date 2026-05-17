@@ -1,4 +1,8 @@
-"""Ridge 재학습과 feature encoding."""
+"""Ridge 재학습과 feature encoding.
+
+Spring이 모아 둔 raw history를 받아 새 계수 term 목록을 계산한다. 범주형 feature는
+기준 카테고리 하나를 제외해 intercept와 각 beta의 의미가 안정적으로 유지되게 한다.
+"""
 
 from __future__ import annotations
 
@@ -35,6 +39,7 @@ def fit_ridge_coefficients(
     if not history:
         raise CalculationError("EMPTY_HISTORY", "Ridge 재학습에는 history가 필요합니다.")
 
+    # feature_names에는 reference category가 빠진 실제 학습 대상만 들어간다.
     feature_names, references = _ridge_feature_names_and_references(history, stage)
     rows = []
     targets = []
@@ -44,6 +49,7 @@ def fit_ridge_coefficients(
         if estimated <= 0 or actual <= 0:
             raise CalculationError("INVALID_HISTORY_MINUTES", "history의 estimated/actual minutes는 0보다 커야 합니다.")
         active = _active_feature_keys(row, stage, feature_names)
+        # Ridge target은 예측 오차가 아니라 사용자의 원래 estimate 대비 actual 비율이다.
         rows.append([1.0 if name in active else 0.0 for name in feature_names])
         targets.append(math.log(actual / estimated))
 
@@ -66,6 +72,8 @@ def _ridge_feature_names(history: Sequence[dict], stage: str) -> list[str]:
 
 
 def _ridge_feature_names_and_references(history: Sequence[dict], stage: str) -> tuple[list[str], dict[str, str | None]]:
+    """학습 feature와 각 feature 그룹의 reference category를 함께 만든다."""
+
     if stage not in {STAGE_MAIN_EFFECT, STAGE_INTERACTION}:
         raise CalculationError("INVALID_STAGE", "Ridge feature 생성은 MAIN_EFFECT 또는 INTERACTION 단계에서만 수행합니다.")
 
@@ -88,6 +96,7 @@ def _ridge_feature_names_and_references(history: Sequence[dict], stage: str) -> 
     if stage == STAGE_INTERACTION:
         interaction_counts = _interaction_counts(history)
         for group_name in ("taskTypeDifficulty", "taskTypeFolder", "folderDifficulty"):
+            # 상호작용항은 최소 관측 수를 넘은 조합만 feature로 사용한다.
             ready_counts = {
                 key: count
                 for key, count in interaction_counts[group_name].items()
@@ -116,6 +125,8 @@ def _count_by_feature_prefix(history: Sequence[dict], prefix: str) -> dict[str, 
 
 
 def _select_difficulty_reference(difficulty_counts: dict[str, int]) -> str | None:
+    """난이도는 NORMAL/MEDIUM을 기준값으로 우선 선택해 해석을 직관적으로 유지한다."""
+
     if "difficulty:NORMAL" in difficulty_counts:
         return "difficulty:NORMAL"
     if "difficulty:MEDIUM" in difficulty_counts:
@@ -173,6 +184,7 @@ def _fit_ridge_drop_reference(rows: list[list[float]], targets: list[float], alp
                 matrix[i][j] += left * right
 
     for i in range(1, size):
+        # intercept는 정규화하지 않고, feature weight에만 Ridge penalty를 적용한다.
         matrix[i][i] += alpha
 
     solution = _solve_linear_system(matrix, vector)
@@ -180,6 +192,8 @@ def _fit_ridge_drop_reference(rows: list[list[float]], targets: list[float], alp
 
 
 def _solve_linear_system(matrix: list[list[float]], vector: list[float]) -> list[float]:
+    """작은 행렬용 Gauss-Jordan 소거법 solver."""
+
     size = len(vector)
     augmented = [row[:] + [vector[i]] for i, row in enumerate(matrix)]
 
@@ -209,6 +223,8 @@ def _inc(counts: dict[str, int], key: str) -> None:
 
 
 def _active_feature_keys(row: dict, stage: str, feature_names: Iterable[str]) -> set[str]:
+    """history row 하나에서 켜지는 one-hot feature key를 계산한다."""
+
     task_type = str(row["task_type"])
     difficulty = str(row["difficulty"])
     folder_id = str(row["folder_id"])
@@ -234,6 +250,8 @@ def _ridge_terms(
     coefficients: Sequence[float],
     references: dict[str, str | None],
 ) -> dict:
+    """Spring이 저장하기 쉬운 term payload로 Ridge 결과를 변환한다."""
+
     terms = [{"term": "BETA_INTERCEPT", "key": "global", "weight": float(intercept)}]
     for name, weight in zip(feature_names, coefficients, strict=True):
         terms.append({"term": _term_type_from_feature_name(name), "key": name, "weight": float(weight)})

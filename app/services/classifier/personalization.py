@@ -62,6 +62,7 @@ class KeywordPersonalization:
             past_tokens = set(self._tokenize(past.name))
             if not past_tokens:
                 continue
+            # MVP에서는 단순 Jaccard 유사도로 충분히 비슷한 과거 태스크를 찾는다.
             intersection = len(new_tokens & past_tokens)
             union = len(new_tokens | past_tokens)
             score = intersection / union if union > 0 else 0.0
