@@ -37,8 +37,6 @@ def _validate_counts(counts: CountsPayload) -> None:
         counts.difficulty,
         counts.task_type,
         counts.folder_difficulty,
-        counts.folder_type,
-        counts.difficulty_type,
         counts.task_type_difficulty,
         counts.task_type_folder,
         counts.completed_since_last_train,

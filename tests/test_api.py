@@ -27,14 +27,14 @@ def _predict_payload(total_completed: int = 42) -> dict:
             "taskType": "SCOPE_BOUND",
         },
         "coefficients": {
-            "bias": 0.08,
             "globalMultiplier": 1.1,
-            "folder": 0.12,
-            "difficulty": 0.1,
-            "taskType": 0.07,
-            "folderDifficulty": 0.08,
-            "folderType": 0.04,
-            "difficultyType": 0.06,
+            "betaIntercept": 0.08,
+            "betaFolder": {"folder:10": 0.12},
+            "betaDifficulty": {"difficulty:HARD": 0.1},
+            "betaType": {"taskType:SCOPE_BOUND": 0.07},
+            "betaFolderDifficulty": {"folderDifficulty:10:HARD": 0.08},
+            "betaTypeFolder": {"taskTypeFolder:SCOPE_BOUND:10": 0.04},
+            "betaTypeDifficulty": {"taskTypeDifficulty:SCOPE_BOUND:HARD": 0.06},
         },
         "counts": {
             "totalCompleted": total_completed,
@@ -42,8 +42,8 @@ def _predict_payload(total_completed: int = 42) -> dict:
             "difficulty": 18,
             "taskType": 21,
             "folderDifficulty": 9,
-            "folderType": 12,
-            "difficultyType": 10,
+            "taskTypeFolder": 12,
+            "taskTypeDifficulty": 10,
         },
     }
 

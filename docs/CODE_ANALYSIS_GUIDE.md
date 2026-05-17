@@ -324,7 +324,7 @@ CandidateTask 목록
 ### `tests/test_api.py`
 
 - `/health` 정상 응답
-- `/v1/predict` `STAGE_0` 공통 성공 응답
+- `/v1/predict` `EARLY` 공통 성공 응답
 - Pydantic 검증 실패 시 공통 실패 응답
 - `/v1/update` 공통 성공 응답과 `countIncrements`
 - `/v1/recommend` 추천 결과가 가용시간을 넘지 않음

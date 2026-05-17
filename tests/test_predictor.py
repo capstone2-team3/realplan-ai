@@ -87,14 +87,14 @@ def _predict_payload(total_completed: int) -> dict:
             "taskType": "SCOPE_BOUND",
         },
         "coefficients": {
-            "bias": 0.08,
             "globalMultiplier": 1.1,
-            "folder": 0.12,
-            "difficulty": 0.1,
-            "taskType": 0.07,
-            "folderDifficulty": 0.08,
-            "folderType": 0.04,
-            "difficultyType": 0.06,
+            "betaIntercept": 0.08,
+            "betaFolder": {"folder:10": 0.12},
+            "betaDifficulty": {"difficulty:HARD": 0.1},
+            "betaType": {"taskType:SCOPE_BOUND": 0.07},
+            "betaFolderDifficulty": {"folderDifficulty:10:HARD": 0.08},
+            "betaTypeFolder": {"taskTypeFolder:SCOPE_BOUND:10": 0.04},
+            "betaTypeDifficulty": {"taskTypeDifficulty:SCOPE_BOUND:HARD": 0.06},
         },
         "counts": {
             "totalCompleted": total_completed,
@@ -102,8 +102,8 @@ def _predict_payload(total_completed: int) -> dict:
             "difficulty": 18,
             "taskType": 21,
             "folderDifficulty": 9,
-            "folderType": 12,
-            "difficultyType": 10,
+            "taskTypeFolder": 12,
+            "taskTypeDifficulty": 10,
             "completedSinceLastTrain": 0,
         },
     }
@@ -157,9 +157,9 @@ class TestPredictCoefficientLogic:
         payload["coefficients"].update(
             {
                 "betaIntercept": 0.1,
-                "betaType": 0.2,
-                "betaDifficulty": 0.3,
-                "betaFolder": 0.4,
+                "betaType": {"taskType:SCOPE_BOUND": 0.2},
+                "betaDifficulty": {"difficulty:HARD": 0.3},
+                "betaFolder": {"folder:10": 0.4},
             }
         )
         payload["counts"]["taskType"] = 100
@@ -179,12 +179,12 @@ class TestPredictCoefficientLogic:
         payload["coefficients"].update(
             {
                 "betaIntercept": 0.0,
-                "betaType": 0.1,
-                "betaDifficulty": 0.1,
-                "betaFolder": 0.1,
-                "betaTypeDifficulty": 0.2,
-                "betaTypeFolder": 0.3,
-                "betaFolderDifficulty": 0.4,
+                "betaType": {"taskType:SCOPE_BOUND": 0.1},
+                "betaDifficulty": {"difficulty:HARD": 0.1},
+                "betaFolder": {"folder:10": 0.1},
+                "betaTypeDifficulty": {"taskTypeDifficulty:SCOPE_BOUND:HARD": 0.2},
+                "betaTypeFolder": {"taskTypeFolder:SCOPE_BOUND:10": 0.3},
+                "betaFolderDifficulty": {"folderDifficulty:10:HARD": 0.4},
             }
         )
         payload["counts"]["taskTypeDifficulty"] = 20

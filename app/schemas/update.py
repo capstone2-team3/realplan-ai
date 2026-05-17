@@ -47,7 +47,6 @@ class UpdatedTerm(BaseModel):
     new_weight: float = Field(..., alias="newWeight")
     delta: float
     update_method: str | None = Field(default=None, alias="updateMethod")
-    share: float | None = None
     reliability: float | None = None
 
 
@@ -61,8 +60,6 @@ class CountIncrements(BaseModel):
     folder_difficulty: dict[str, int] = Field(..., alias="folderDifficulty")
     task_type_difficulty: dict[str, int] = Field(default_factory=dict, alias="taskTypeDifficulty")
     task_type_folder: dict[str, int] = Field(default_factory=dict, alias="taskTypeFolder")
-    folder_type: dict[str, int] = Field(default_factory=dict, alias="folderType")
-    difficulty_type: dict[str, int] = Field(default_factory=dict, alias="difficultyType")
 
 
 class HistoryRecord(BaseModel):

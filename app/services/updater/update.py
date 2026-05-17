@@ -95,7 +95,7 @@ def _update_early_terms(
         old_global = math.log(coefficients.global_multiplier)
     new_global = ((1 - EARLY_ETA_GLOBAL) * old_global) + (EARLY_ETA_GLOBAL * clamped_log_ratio)
 
-    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type, "task_type") or 0.0
+    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type) or 0.0
     new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * clamped_log_ratio)
 
     return [

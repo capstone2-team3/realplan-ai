@@ -22,7 +22,7 @@ from app.services.planning_model.constants import (
     STAGE_EARLY,
     STAGE_INTERACTION,
 )
-from app.services.planning_model.keys import TaskKeys, _keys, _legacy_keys
+from app.services.planning_model.keys import TaskKeys, _keys
 from app.services.planning_model.stages import _clip, _log_policy, _select_prediction_stage, _shrinkage
 from app.services.planning_model.terms import _term
 from app.services.planning_model.validation import _validate_task_common
@@ -46,7 +46,6 @@ def calculate_prediction(req: PredictRequest) -> dict:
 
     stage = _select_prediction_stage(counts.total_completed)
     keys = _keys(task.folder_id, task.difficulty, task.task_type)
-    legacy_keys = _legacy_keys(task.folder_id, task.difficulty, task.task_type)
 
     # 완료 이력이 적은 EARLY 단계는 Ridge 계수보다 prior와 EMA 계수를 더 신뢰한다.
     if stage == STAGE_EARLY:
@@ -54,7 +53,6 @@ def calculate_prediction(req: PredictRequest) -> dict:
             coefficients,
             counts,
             keys,
-            legacy_keys,
             task.difficulty,
             task.task_type,
         )
@@ -100,7 +98,6 @@ def _calculate_early_log_correction(
     coefficients: CoefficientsPayload,
     counts: CountsPayload,
     keys: TaskKeys,
-    legacy_keys: dict[str, str],
     difficulty: str,
     task_type: str,
 ) -> tuple[float, list[dict]]:
@@ -118,7 +115,6 @@ def _calculate_early_log_correction(
         coefficients,
         "log_alpha_type",
         keys.task_type,
-        legacy_scalar_name="task_type",
     )
     if log_alpha_type is None:
         log_alpha_type = _type_prior(task_type)
@@ -130,7 +126,7 @@ def _calculate_early_log_correction(
         [
             _term("logAlphaGlobal", "global", log_alpha_global, 1.0, log_alpha_global),
             _term("logAlphaType", keys.task_type, log_alpha_type, r_type, r_type * log_alpha_type),
-            _term("difficultyPrior", legacy_keys["difficulty"], difficulty_prior, 1.0, difficulty_prior),
+            _term("difficultyPrior", keys.difficulty, difficulty_prior, 1.0, difficulty_prior),
         ],
     )
 
@@ -147,30 +143,28 @@ def _calculate_main_effect_log_correction(
     used_terms: list[dict] = []
     references = _encoding_references(coefficients)
 
-    beta_intercept = _mapped_or_scalar(coefficients, "beta_intercept", "global", "bias") or 0.0
+    beta_intercept = _mapped_or_scalar(coefficients, "beta_intercept", "global") or 0.0
     used_terms.append(_term("betaIntercept", "global", beta_intercept, 1.0, beta_intercept))
     log_correction = beta_intercept
 
     candidates = (
-        ("betaType", keys.task_type, "beta_type", "task_type", counts.task_type, _type_prior(task_type), references.get("taskType")),
+        ("betaType", keys.task_type, "beta_type", counts.task_type, _type_prior(task_type), references.get("taskType")),
         (
             "betaDifficulty",
             keys.difficulty,
             "beta_difficulty",
-            "difficulty",
             counts.difficulty,
             _difficulty_prior(difficulty),
             references.get("difficulty"),
         ),
-        ("betaFolder", keys.folder, "beta_folder", "folder", counts.folder, 0.0, references.get("folder")),
+        ("betaFolder", keys.folder, "beta_folder", counts.folder, 0.0, references.get("folder")),
     )
-    for term, key, attr_name, legacy_scalar_name, count, prior, reference_key in candidates:
+    for term, key, attr_name, count, prior, reference_key in candidates:
         learned, is_reference = _coefficient_or_reference_zero(
             coefficients,
             attr_name,
             key,
             reference_key,
-            legacy_scalar_name,
             prior,
         )
         reliability = _shrinkage(count)
@@ -197,33 +191,30 @@ def _append_interaction_terms(
             "betaTypeDifficulty",
             keys.task_type_difficulty,
             "beta_type_difficulty",
-            "difficulty_type",
-            counts.task_type_difficulty or counts.difficulty_type,
+            counts.task_type_difficulty,
             references.get("taskTypeDifficulty"),
         ),
         (
             "betaTypeFolder",
             keys.task_type_folder,
             "beta_type_folder",
-            "folder_type",
-            counts.task_type_folder or counts.folder_type,
+            counts.task_type_folder,
             references.get("taskTypeFolder"),
         ),
         (
             "betaFolderDifficulty",
             keys.folder_difficulty,
             "beta_folder_difficulty",
-            "folder_difficulty",
             counts.folder_difficulty,
             references.get("folderDifficulty"),
         ),
     )
-    for term, key, attr_name, legacy_scalar_name, count, reference_key in candidates:
+    for term, key, attr_name, count, reference_key in candidates:
         if count < INTERACTION_COUNT_THRESHOLD:
             continue
         if reference_key is not None and key == reference_key:
             continue
-        weight = _mapped_or_scalar(coefficients, attr_name, key, legacy_scalar_name)
+        weight = _mapped_or_scalar(coefficients, attr_name, key)
         if weight is None:
             continue
         used_terms.append(_term(term, key, weight, 1.0, weight))

@@ -1,7 +1,7 @@
 """계수 조회와 prior 계산.
 
-Spring payload는 신규 map 기반 계수와 과거 scalar 계수가 섞여 들어올 수 있다.
-이 모듈은 두 형식을 같은 방식으로 읽고, 학습 전에는 보수적인 prior를 제공한다.
+Spring payload는 v2.1 표준 key 기반 계수를 전달한다. 이 모듈은 현재 task key에
+해당하는 값을 꺼내고, 학습 전에는 보수적인 prior를 제공한다.
 """
 
 from __future__ import annotations
@@ -27,9 +27,8 @@ def _mapped_or_scalar(
     coefficients: CoefficientsPayload,
     attr_name: str,
     key: str,
-    legacy_scalar_name: str | None = None,
 ) -> float | None:
-    """map 계수를 우선 읽고, 없으면 legacy scalar 계수를 fallback으로 읽는다."""
+    """map 계수를 우선 읽고, beta 계수가 scalar로 온 경우도 같은 값으로 처리한다."""
 
     value = getattr(coefficients, attr_name, None)
     if isinstance(value, dict):
@@ -38,12 +37,6 @@ def _mapped_or_scalar(
             return mapping[key]
     if isinstance(value, int | float):
         return float(value)
-
-    if legacy_scalar_name is None:
-        return None
-    legacy_value = getattr(coefficients, legacy_scalar_name, None)
-    if isinstance(legacy_value, int | float):
-        return float(legacy_value)
     return None
 
 
@@ -61,7 +54,6 @@ def _coefficient_or_reference_zero(
     attr_name: str,
     key: str,
     reference_key: str | None,
-    legacy_scalar_name: str | None = None,
     prior: float = 0.0,
 ) -> tuple[float, bool]:
     """계수가 reference category인지 확인하고, 없으면 prior로 보정한다."""
@@ -69,7 +61,7 @@ def _coefficient_or_reference_zero(
     if reference_key is not None and key == reference_key:
         return 0.0, True
 
-    value = _mapped_or_scalar(coefficients, attr_name, key, legacy_scalar_name)
+    value = _mapped_or_scalar(coefficients, attr_name, key)
     if value is not None:
         return value, False
 

@@ -18,14 +18,7 @@ class TaskPayload(BaseModel):
 class CoefficientsPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    bias: float = 0.0
     global_multiplier: float = Field(1.0, alias="globalMultiplier")
-    folder: float | None = None
-    difficulty: float | None = None
-    task_type: float | None = Field(default=None, alias="taskType")
-    folder_difficulty: float | None = Field(default=None, alias="folderDifficulty")
-    folder_type: float | None = Field(default=None, alias="folderType")
-    difficulty_type: float | None = Field(default=None, alias="difficultyType")
     log_alpha_global: float | dict[str, float] | None = Field(default=None, alias="logAlphaGlobal")
     log_alpha_type: float | dict[str, float] | None = Field(default=None, alias="logAlphaType")
     beta_intercept: float | dict[str, float] | None = Field(default=None, alias="betaIntercept")
@@ -46,8 +39,6 @@ class CountsPayload(BaseModel):
     difficulty: int = 0
     task_type: int = Field(0, alias="taskType")
     folder_difficulty: int = Field(0, alias="folderDifficulty")
-    folder_type: int = Field(0, alias="folderType")
-    difficulty_type: int = Field(0, alias="difficultyType")
     task_type_difficulty: int = Field(0, alias="taskTypeDifficulty")
     task_type_folder: int = Field(0, alias="taskTypeFolder")
     completed_since_last_train: int = Field(0, alias="completedSinceLastTrain")

@@ -34,17 +34,3 @@ def _keys(folder_id: int, difficulty: str, task_type: str) -> TaskKeys:
         task_type_folder=f"taskTypeFolder:{task_type}:{folder_id}",
         folder_difficulty=f"folderDifficulty:{folder_id}:{difficulty}",
     )
-
-
-def _legacy_keys(folder_id: int, difficulty: str, task_type: str) -> dict[str, str]:
-    """Deprecated: 기존 Spring 저장 key와 호환하기 위한 legacy key 모음."""
-
-    folder_key = str(folder_id)
-    return {
-        "folder": folder_key,
-        "difficulty": difficulty,
-        "taskType": task_type,
-        "folderDifficulty": f"{folder_key}:{difficulty}",
-        "folderType": f"{folder_key}:{task_type}",
-        "difficultyType": f"{difficulty}:{task_type}",
-    }
