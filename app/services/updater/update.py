@@ -1,0 +1,153 @@
+"""완료 태스크 기반 계수 업데이트 계산."""
+
+from __future__ import annotations
+
+import math
+from typing import Any
+
+from app.schemas.predict import CoefficientsPayload, CountsPayload
+from app.schemas.update import UpdateRequest
+from app.services.planning_model.coefficients import _mapped_or_scalar
+from app.services.planning_model.constants import (
+    EARLY_ETA_GLOBAL,
+    EARLY_ETA_TYPE,
+    INTERACTION_RETRAIN_INTERVAL,
+    MAIN_EFFECT_RETRAIN_INTERVAL,
+    MODEL_VERSION,
+    OBSERVATION_LOG_MAX,
+    OBSERVATION_LOG_MIN,
+    STAGE_EARLY,
+    STAGE_INTERACTION,
+    STAGE_MAIN_EFFECT,
+)
+from app.services.planning_model.errors import CalculationError
+from app.services.planning_model.keys import TaskKeys, _keys
+from app.services.planning_model.stages import _clip, _select_prediction_stage, _shrinkage
+from app.services.planning_model.terms import _updated_term
+from app.services.planning_model.validation import _validate_task_common
+
+
+def update_coefficients(req: UpdateRequest) -> dict:
+    """완료 태스크 1건의 관측값으로 raw history와 필요한 계수 갱신 정보를 계산한다."""
+
+    task = req.completed_task
+    coefficients = req.coefficients
+    counts = req.counts
+    _validate_task_common(
+        task.estimated_minutes,
+        task.difficulty,
+        task.task_type,
+        coefficients,
+        counts,
+    )
+    if task.predicted_minutes <= 0:
+        raise CalculationError("INVALID_PREDICTED_MINUTES", "predictedMinutes는 0보다 커야 합니다.")
+    if task.actual_minutes <= 0:
+        raise CalculationError("INVALID_ACTUAL_MINUTES", "actualMinutes는 0보다 커야 합니다.")
+
+    stage = _select_prediction_stage(counts.total_completed)
+    ratio = task.actual_minutes / task.estimated_minutes
+    log_ratio = math.log(ratio)
+    clamped_log_ratio = _clip(log_ratio, OBSERVATION_LOG_MIN, OBSERVATION_LOG_MAX)
+    keys = _keys(task.folder_id, task.difficulty, task.task_type)
+
+    updated_terms: list[dict] = []
+    if stage == STAGE_EARLY:
+        updated_terms = _update_early_terms(
+            coefficients,
+            counts,
+            keys,
+            clamped_log_ratio,
+        )
+
+    return {
+        "taskId": task.task_id,
+        "modelVersion": MODEL_VERSION,
+        "stage": stage,
+        "error": _observation(task, ratio, log_ratio, clamped_log_ratio),
+        "observation": _observation(task, ratio, log_ratio, clamped_log_ratio),
+        "historyRecord": _history_record(task, log_ratio),
+        "historyAppend": _history_record(task, log_ratio),
+        "updatedTerms": updated_terms,
+        "countIncrements": _count_increments(task.folder_id, task.difficulty, task.task_type),
+        "retrainRequired": _retrain_required(stage, counts.completed_since_last_train),
+    }
+
+
+def _update_early_terms(
+    coefficients: CoefficientsPayload,
+    counts: CountsPayload,
+    keys: TaskKeys,
+    clamped_log_ratio: float,
+) -> list[dict]:
+    old_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
+    if old_global is None:
+        old_global = math.log(coefficients.global_multiplier)
+    new_global = ((1 - EARLY_ETA_GLOBAL) * old_global) + (EARLY_ETA_GLOBAL * clamped_log_ratio)
+
+    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type, "task_type") or 0.0
+    new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * clamped_log_ratio)
+
+    return [
+        _updated_term(
+            "LOG_ALPHA_GLOBAL",
+            "global",
+            old_global,
+            new_global,
+            "EMA_LOG_RATIO",
+        ),
+        _updated_term(
+            "LOG_ALPHA_TYPE",
+            keys.task_type,
+            old_type,
+            new_type,
+            "EMA_LOG_RATIO",
+            reliability=_shrinkage(counts.task_type),
+        ),
+    ]
+
+
+def _observation(task: Any, ratio: float, log_ratio: float, clamped_log_ratio: float) -> dict:
+    return {
+        "estimatedMinutes": task.estimated_minutes,
+        "predictedMinutes": task.predicted_minutes,
+        "actualMinutes": task.actual_minutes,
+        "actualOverEstimatedRatio": ratio,
+        "logRatio": log_ratio,
+        "clampedLogRatio": clamped_log_ratio,
+    }
+
+
+def _history_record(task: Any, log_ratio: float) -> dict:
+    return {
+        "task_id": task.task_id,
+        "estimated_minutes": task.estimated_minutes,
+        "predicted_minutes": task.predicted_minutes,
+        "actual_minutes": task.actual_minutes,
+        "log_ratio": log_ratio,
+        "task_type": task.task_type,
+        "difficulty": task.difficulty,
+        "folder_id": task.folder_id,
+    }
+
+
+def _retrain_required(stage: str, completed_since_last_train: int) -> bool:
+    after_append = completed_since_last_train + 1
+    if stage == STAGE_MAIN_EFFECT:
+        return after_append >= MAIN_EFFECT_RETRAIN_INTERVAL
+    if stage == STAGE_INTERACTION:
+        return after_append >= INTERACTION_RETRAIN_INTERVAL
+    return False
+
+
+def _count_increments(folder_id: int, difficulty: str, task_type: str) -> dict:
+    keys = _keys(folder_id, difficulty, task_type)
+    return {
+        "totalCompleted": 1,
+        "taskType": {keys.task_type: 1},
+        "difficulty": {keys.difficulty: 1},
+        "folder": {keys.folder: 1},
+        "taskTypeDifficulty": {keys.task_type_difficulty: 1},
+        "taskTypeFolder": {keys.task_type_folder: 1},
+        "folderDifficulty": {keys.folder_difficulty: 1},
+    }

@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import math
 
-from app.services.classifier import TaskType
 from app.schemas.predict import PredictRequest
 from app.schemas.update import UpdateRequest
-from app.services.estimator.constants import BASE_TYPE_MULTIPLIER
-from app.services.predictor import (
+from app.services.classifier import TaskType
+from app.services.planning_model import (
     SessionRecord,
     UserTypeProfile,
     _active_feature_keys,
     _ridge_feature_names_and_references,
     _select_prediction_stage,
-    calculate_prediction,
     fit_ridge_coefficients,
-    update_coefficients,
     update_user_profile,
 )
+from app.services.planning_model.priors import BASE_TYPE_MULTIPLIER
+from app.services.predictor import calculate_prediction
+from app.services.updater import update_coefficients
 
 
 class TestSelectStage:

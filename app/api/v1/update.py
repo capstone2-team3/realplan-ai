@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.response import ApiResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.predictor import CalculationError, update_coefficients
+from app.services.planning_model import CalculationError
+from app.services.updater import update_coefficients
 
 router = APIRouter()
 

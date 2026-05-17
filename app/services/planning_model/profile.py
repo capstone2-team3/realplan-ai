@@ -1,4 +1,4 @@
-"""완료 세션을 바탕으로 보정계수를 갱신한다."""
+"""완료 세션을 바탕으로 사용자 유형별 프로필을 갱신한다."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.services.classifier import TaskType
-from app.services.estimator.constants import (
+from app.services.planning_model.priors import (
     BASE_TYPE_MULTIPLIER,
     EMA_ALPHA,
     FOCUS_COEF,

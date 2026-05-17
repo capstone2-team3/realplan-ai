@@ -152,7 +152,7 @@ def test_classify_with_mocked_llm(client, monkeypatch, fake_openai_factory):
         "reason": "주관적 완료 기준",
     })
 
-    # core.classify_task 내부에서 OpenAI()를 새로 만들기 직전에 가로챔.
+    # classification.classify_task 내부에서 OpenAI()를 새로 만들기 직전에 가로챔.
     import openai
     monkeypatch.setattr(openai, "OpenAI", lambda **_: fake)
 

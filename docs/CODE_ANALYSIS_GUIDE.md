@@ -37,7 +37,7 @@ Spring Backend
 4. `app/schemas/*.py`
    - Spring 백엔드와 맞춰야 하는 요청/응답 필드 계약을 확인합니다.
 
-5. `app/services/*.py`, `app/services/classifier/*.py`
+5. `app/services/*/*.py`, `app/services/scheduler.py`
    - 태스크 분류, 시간 보정, 추천 알고리즘의 실제 로직을 확인합니다.
 
 6. `tests/*.py`
@@ -65,21 +65,30 @@ app/
     update.py
     recommend.py
   services/
-    predictor.py
     scheduler.py
-    estimator/
-      base.py
-      blend.py
-      regression.py
-      advanced.py
-      selector.py
-      updater.py
     classifier/
       __init__.py
-      core.py
+      classification.py
       personalization.py
       prompts.py
       types.py
+    planning_model/
+      constants.py
+      coefficients.py
+      errors.py
+      keys.py
+      priors.py
+      profile.py
+      ridge.py
+      stages.py
+      terms.py
+      validation.py
+    predictor/
+      __init__.py
+      prediction.py
+    updater/
+      __init__.py
+      update.py
 tests/
   conftest.py
   test_api.py
@@ -144,7 +153,7 @@ FastAPI 예외를 공통 실패 응답으로 변환합니다.
 
 - `app/api/v1/classify.py`
 - `app/schemas/classify.py`
-- `app/services/classifier/core.py`
+- `app/services/classifier/classification.py`
 
 역할:
 
@@ -176,7 +185,8 @@ ClassifyRequest
 
 - `app/api/v1/predict.py`
 - `app/schemas/predict.py`
-- `app/services/predictor.py`
+- `app/services/predictor/prediction.py`
+- `app/services/planning_model/*.py`
 
 역할:
 
@@ -187,29 +197,24 @@ ClassifyRequest
 핵심 공식:
 
 ```text
-STAGE_0:
-predictedMinutes = round(estimatedMinutes * clamp(globalMultiplier, 0.5, 2.5))
-
-STAGE_1 이상:
 predictedMinutes = round(estimatedMinutes * exp(logCorrection))
-logCorrection = clamp(bias + 신뢰도 반영 항들의 contribution)
+logCorrection = clamp(단계별 log 보정항 합계)
 ```
 
 단계별 사용 항:
 
-- `STAGE_0`: `globalMultiplier`만 사용
-- `STAGE_1`: `bias`만 사용
-- `STAGE_2`: `bias` + `folder`, `difficulty`, `taskType`
-- `STAGE_3` 이상: `bias` + 1차 항 + `folderDifficulty`, `folderType`, `difficultyType`
+- `EARLY`: `logAlphaGlobal`, `logAlphaType`, 난이도 prior
+- `MAIN_EFFECT`: `betaIntercept`, `betaType`, `betaDifficulty`, `betaFolder`
+- `INTERACTION`: `MAIN_EFFECT` 항 + 준비된 상호작용항
 
 key 규칙:
 
-- folder key: `str(folderId)`
-- difficulty key: `EASY | NORMAL | HARD | UNKNOWN`
-- taskType key: `TIME_BOUND | SCOPE_BOUND | SATISFACTION_BOUND`
-- folderDifficulty key: `{folderId}:{difficulty}`
-- folderType key: `{folderId}:{taskType}`
-- difficultyType key: `{difficulty}:{taskType}`
+- folder key: `folder:{folderId}`
+- difficulty key: `difficulty:{difficulty}`
+- taskType key: `taskType:{taskType}`
+- taskTypeDifficulty key: `taskTypeDifficulty:{taskType}:{difficulty}`
+- taskTypeFolder key: `taskTypeFolder:{taskType}:{folderId}`
+- folderDifficulty key: `folderDifficulty:{folderId}:{difficulty}`
 
 주의할 점:
 
@@ -225,7 +230,8 @@ key 규칙:
 
 - `app/api/v1/update.py`
 - `app/schemas/update.py`
-- `app/services/predictor.py`
+- `app/services/updater/update.py`
+- `app/services/planning_model/*.py`
 
 역할:
 
@@ -235,21 +241,19 @@ key 규칙:
 핵심 갱신 흐름:
 
 ```text
-logError = log(actualMinutes / predictedMinutes)
-clampedLogError = clamp(logError, log(0.5), log(2.0))
+logRatio = log(actualMinutes / estimatedMinutes)
+clampedLogRatio = clamp(logRatio, log(0.5), log(2.0))
 
-STAGE_0:
-globalMultiplier만 업데이트
+EARLY:
+logAlphaGlobal, logAlphaType을 EMA로 업데이트
 
-STAGE_1 이상:
-w_new = w_old + alpha * share * reliability * clampedLogError
+MAIN_EFFECT / INTERACTION:
+raw history append와 retrainRequired 여부를 반환
 ```
 
 주의할 점:
 
-- `counts.totalCompleted < 5`이면 `globalMultiplier`만 업데이트합니다.
-- `counts.totalCompleted >= 5`이면 `globalMultiplier`는 변경하지 않습니다.
-- `updatedTerms`는 `{term, key, oldWeight, newWeight, delta, share, reliability}` 형태의 patch입니다.
+- `updatedTerms`는 `{term, key, oldWeight, newWeight, delta, updateMethod, reliability}` 형태의 patch입니다.
 - `countIncrements`는 DB 저장용 증가량이며 모든 관련 key에 `1`을 반환합니다.
 - 입력 시간 값들은 모두 `> 0`이어야 합니다.
 
@@ -310,8 +314,8 @@ CandidateTask 목록
 
 `/v1/predict`, `/v1/update`의 보정계수는 두 종류입니다.
 
-- `globalMultiplier`: `STAGE_0`에서만 사용하는 배율 계수입니다.
-- `bias`, `folder`, `difficulty`, `taskType`, 상호작용항: `STAGE_1` 이상에서 사용하는 로그 보정 계수입니다.
+- `logAlphaGlobal`, `logAlphaType`: `EARLY`에서 사용하는 로그 보정 계수입니다.
+- `betaIntercept`, `betaType`, `betaDifficulty`, `betaFolder`, 상호작용항: `MAIN_EFFECT` 이상에서 사용하는 로그 보정 계수입니다.
 
 로그 계수는 더해서 `logCorrection`을 만들고, 최종 배율은 `exp(logCorrection)`으로 계산합니다.
 
@@ -335,17 +339,14 @@ CandidateTask 목록
 
 ### `tests/test_predictor.py`
 
-- 유형별 기본 보정 계수 적용
-- 사용자 개인화 계수 우선 적용
-- 난이도에 따른 보정 증가
-- 보정 계수 상한 제한
-- 기존 호환 `update_user_profile`의 EMA 기반 프로필 갱신
-- `STAGE_0` 예측에서 `globalMultiplier`만 사용
-- `STAGE_1` 예측에서 `bias`만 사용
-- `STAGE_2` 예측에서 count 조건에 따른 1차 항 포함/제외
-- `STAGE_3` 예측에서 2차 항과 `interactionLambda=0.5` 반영
-- `STAGE_0` 업데이트에서 `globalMultiplier`만 변경
-- `STAGE_1` 이상 업데이트에서 `globalMultiplier` 유지
+- 단계 선택 경계
+- 사용자 유형 프로필의 EMA 기반 갱신
+- `EARLY` 예측의 global/type/difficulty prior 반영
+- `MAIN_EFFECT` 예측의 shrinkage 반영
+- `INTERACTION` 예측의 준비된 상호작용항 반영
+- reference category encoding
+- 완료 태스크 history와 count increment 계산
+- Ridge 재학습의 reference category drop encoding
 - 업데이트 응답의 `countIncrements` 정확성
 
 ### `tests/test_scheduler.py`
@@ -375,7 +376,8 @@ CandidateTask 목록
 - 응답 포맷 변경: `app/api/response.py`, `app/api/exceptions.py`를 확인합니다.
 - 분류 기준 변경: `app/services/classifier/prompts.py`를 수정합니다.
 - OpenAI 모델 변경: `app/services/classifier/constants.py`의 `DEFAULT_OPENAI_MODEL`을 확인합니다.
-- 시간 보정 정책 변경: `app/services/predictor.py`의 stage, reliability, clamp, alpha/share 상수를 수정합니다.
+- 예측 정책 변경: `app/services/predictor/prediction.py`와 `app/services/planning_model/*.py`를 확인합니다.
+- 계수 업데이트 정책 변경: `app/services/updater/update.py`와 `app/services/planning_model/*.py`를 확인합니다.
 - 추천 정책 변경: `app/services/scheduler.py`의 중요도 가중치, 분할 후보 생성, Knapsack 로직을 확인합니다.
 
 ## 11. 로컬 실행과 테스트

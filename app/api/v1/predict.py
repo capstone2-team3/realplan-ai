@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.response import ApiResponse
 from app.schemas.predict import PredictRequest, PredictResponse
-from app.services.predictor import CalculationError, calculate_prediction
+from app.services.planning_model import CalculationError
+from app.services.predictor import calculate_prediction
 
 router = APIRouter()
 
