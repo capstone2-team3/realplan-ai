@@ -35,6 +35,7 @@ class CoefficientsPayload(BaseModel):
     beta_type_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaTypeDifficulty")
     beta_type_folder: float | dict[str, float] | None = Field(default=None, alias="betaTypeFolder")
     beta_folder_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaFolderDifficulty")
+    references: dict[str, str | None] | None = None
 
 
 class CountsPayload(BaseModel):

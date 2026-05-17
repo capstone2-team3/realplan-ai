@@ -11,8 +11,11 @@ from app.services.estimator.constants import BASE_TYPE_MULTIPLIER
 from app.services.predictor import (
     SessionRecord,
     UserTypeProfile,
+    _active_feature_keys,
+    _ridge_feature_names_and_references,
     _select_prediction_stage,
     calculate_prediction,
+    fit_ridge_coefficients,
     update_coefficients,
     update_user_profile,
 )
@@ -195,6 +198,23 @@ class TestPredictCoefficientLogic:
         assert "betaFolderDifficulty" in terms
         assert "betaTypeFolder" not in terms
 
+    def test_reference_category_contributes_zero_when_metadata_is_present(self):
+        payload = _predict_payload(total_completed=80)
+        payload["task"]["difficulty"] = "NORMAL"
+        payload["coefficients"].update(
+            {
+                "betaIntercept": 0.1,
+                "betaDifficulty": {"difficulty:HARD": 0.25},
+                "references": {"difficulty": "difficulty:NORMAL"},
+            }
+        )
+        out = _predict_result(payload)
+        difficulty_term = next(term for term in out["usedTerms"] if term["term"] == "betaDifficulty")
+
+        assert difficulty_term["key"] == "difficulty:NORMAL"
+        assert difficulty_term["weight"] == 0.0
+        assert difficulty_term["contribution"] == 0.0
+
 
 class TestUpdateCoefficientLogic:
     def test_update_uses_actual_over_estimated_target_and_history(self):
@@ -243,3 +263,65 @@ class TestUpdateCoefficientLogic:
             "taskTypeFolder": {"taskTypeFolder:SCOPE_BOUND:10": 1},
             "taskTypeDifficulty": {"taskTypeDifficulty:SCOPE_BOUND:HARD": 1},
         }
+
+
+def _history_row(task_type: str, difficulty: str, folder_id: int, actual_minutes: int = 120) -> dict:
+    return {
+        "task_type": task_type,
+        "difficulty": difficulty,
+        "folder_id": folder_id,
+        "estimated_minutes": 100,
+        "actual_minutes": actual_minutes,
+    }
+
+
+class TestRidgeDropReferenceEncoding:
+    def test_main_effect_drops_reference_features(self):
+        history = [
+            _history_row("A", "NORMAL", 1),
+            _history_row("A", "NORMAL", 1),
+            _history_row("A", "NORMAL", 1),
+            _history_row("B", "HARD", 1),
+            _history_row("B", "HARD", 2),
+        ]
+        feature_names, references = _ridge_feature_names_and_references(history, "MAIN_EFFECT")
+
+        assert references["taskType"] == "taskType:A"
+        assert references["difficulty"] == "difficulty:NORMAL"
+        assert references["folder"] == "folder:1"
+        assert "taskType:A" not in feature_names
+        assert "difficulty:NORMAL" not in feature_names
+        assert "folder:1" not in feature_names
+        assert {"taskType:B", "difficulty:HARD", "folder:2"}.issubset(set(feature_names))
+
+    def test_active_feature_excludes_reference_categories(self):
+        feature_names = ["taskType:B", "difficulty:HARD", "folder:2"]
+        row = _history_row("A", "NORMAL", 1)
+        assert _active_feature_keys(row, "MAIN_EFFECT", feature_names) == set()
+
+    def test_fit_ridge_returns_encoding_references(self):
+        history = [
+            _history_row("A", "NORMAL", 1, 100),
+            _history_row("A", "NORMAL", 1, 110),
+            _history_row("B", "HARD", 2, 130),
+        ]
+        out = fit_ridge_coefficients(history, "MAIN_EFFECT")
+
+        assert out["modelVersion"] == "v2.1.0"
+        assert out["encoding"]["fitIntercept"] is True
+        assert out["encoding"]["dropReferenceCategory"] is True
+        assert out["encoding"]["references"]["difficulty"] == "difficulty:NORMAL"
+        assert all(term["key"] != out["encoding"]["references"]["taskType"] for term in out["terms"])
+
+    def test_interaction_drops_ready_group_reference(self):
+        history = []
+        history.extend(_history_row("A", "NORMAL", 1) for _ in range(25))
+        history.extend(_history_row("B", "HARD", 2) for _ in range(20))
+        history.extend(_history_row("C", "HARD", 2) for _ in range(10))
+
+        feature_names, references = _ridge_feature_names_and_references(history, "INTERACTION")
+
+        assert references["taskTypeDifficulty"] == "taskTypeDifficulty:A:NORMAL"
+        assert "taskTypeDifficulty:A:NORMAL" not in feature_names
+        assert "taskTypeDifficulty:B:HARD" in feature_names
+        assert "taskTypeDifficulty:C:HARD" not in feature_names

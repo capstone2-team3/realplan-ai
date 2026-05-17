@@ -3,7 +3,9 @@
 Spring에서 전달한 현재 태스크의 계수와 완료 횟수를 사용해 사용자 입력 estimate를
 actual에 맞게 보정하는 log 배율을 계산한다. v2 모델은 EARLY, MAIN_EFFECT,
 INTERACTION 3단계로 동작하며 완료 기록의 학습 target은 항상
-``log(actual_minutes / estimated_minutes)`` 이다.
+``log(actual_minutes / estimated_minutes)`` 이다. Ridge 재학습은 intercept를
+학습하고, 각 범주형 변수에서 기준 카테고리 하나를 제외한다. 따라서 intercept는
+기준 조건의 기본 logRatio이고, 각 beta는 기준 대비 차이로 해석된다.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from app.services.estimator.constants import (
 )
 
 
-MODEL_VERSION = "v2.0.0"
+MODEL_VERSION = "v2.1.0"
 
 STAGE_EARLY = "EARLY"
 STAGE_MAIN_EFFECT = "MAIN_EFFECT"
@@ -216,6 +218,34 @@ def _mapped_or_scalar(
     return None
 
 
+def _encoding_references(coefficients: CoefficientsPayload) -> dict[str, str | None]:
+    references = getattr(coefficients, "references", None)
+    if isinstance(references, dict):
+        return {str(key): (str(value) if value is not None else None) for key, value in references.items()}
+    return {}
+
+
+def _coefficient_or_reference_zero(
+    coefficients: CoefficientsPayload,
+    attr_name: str,
+    key: str,
+    reference_key: str | None,
+    legacy_scalar_name: str | None = None,
+    prior: float = 0.0,
+) -> tuple[float, bool]:
+    if reference_key is not None and key == reference_key:
+        return 0.0, True
+
+    value = _mapped_or_scalar(coefficients, attr_name, key, legacy_scalar_name)
+    if value is not None:
+        return value, False
+
+    # TODO: Spring은 fit_ridge_coefficients()가 반환한 encoding.references를 저장한 뒤
+    # predict 요청의 coefficients.references로 다시 보내야 한다. references가 없으면
+    # 기존 v2.0 호환을 위해 미학습 key에 prior를 사용한다.
+    return prior, False
+
+
 def _type_prior(task_type: str) -> float:
     try:
         multiplier = BASE_TYPE_MULTIPLIER[TaskType(task_type)]
@@ -339,22 +369,36 @@ def _calculate_main_effect_log_correction(
     task_type: str,
 ) -> tuple[float, list[dict]]:
     used_terms: list[dict] = []
+    references = _encoding_references(coefficients)
 
     beta_intercept = _mapped_or_scalar(coefficients, "beta_intercept", "global", "bias") or 0.0
     used_terms.append(_term("betaIntercept", "global", beta_intercept, 1.0, beta_intercept))
     log_correction = beta_intercept
 
     candidates = (
-        ("betaType", keys.task_type, "beta_type", "task_type", counts.task_type, _type_prior(task_type)),
-        ("betaDifficulty", keys.difficulty, "beta_difficulty", "difficulty", counts.difficulty, _difficulty_prior(difficulty)),
-        ("betaFolder", keys.folder, "beta_folder", "folder", counts.folder, 0.0),
+        ("betaType", keys.task_type, "beta_type", "task_type", counts.task_type, _type_prior(task_type), references.get("taskType")),
+        (
+            "betaDifficulty",
+            keys.difficulty,
+            "beta_difficulty",
+            "difficulty",
+            counts.difficulty,
+            _difficulty_prior(difficulty),
+            references.get("difficulty"),
+        ),
+        ("betaFolder", keys.folder, "beta_folder", "folder", counts.folder, 0.0, references.get("folder")),
     )
-    for term, key, attr_name, legacy_scalar_name, count, prior in candidates:
-        learned = _mapped_or_scalar(coefficients, attr_name, key, legacy_scalar_name)
-        if learned is None:
-            learned = prior
+    for term, key, attr_name, legacy_scalar_name, count, prior, reference_key in candidates:
+        learned, is_reference = _coefficient_or_reference_zero(
+            coefficients,
+            attr_name,
+            key,
+            reference_key,
+            legacy_scalar_name,
+            prior,
+        )
         reliability = _shrinkage(count)
-        contribution = (reliability * learned) + ((1 - reliability) * prior)
+        contribution = 0.0 if is_reference else (reliability * learned) + ((1 - reliability) * prior)
         log_correction += contribution
         used_terms.append(_term(term, key, learned, reliability, contribution))
 
@@ -368,6 +412,7 @@ def _append_interaction_terms(
     keys: TaskKeys,
 ) -> float:
     total = 0.0
+    references = _encoding_references(coefficients)
     candidates = (
         (
             "betaTypeDifficulty",
@@ -375,6 +420,7 @@ def _append_interaction_terms(
             "beta_type_difficulty",
             "difficulty_type",
             counts.task_type_difficulty or counts.difficulty_type,
+            references.get("taskTypeDifficulty"),
         ),
         (
             "betaTypeFolder",
@@ -382,6 +428,7 @@ def _append_interaction_terms(
             "beta_type_folder",
             "folder_type",
             counts.task_type_folder or counts.folder_type,
+            references.get("taskTypeFolder"),
         ),
         (
             "betaFolderDifficulty",
@@ -389,10 +436,13 @@ def _append_interaction_terms(
             "beta_folder_difficulty",
             "folder_difficulty",
             counts.folder_difficulty,
+            references.get("folderDifficulty"),
         ),
     )
-    for term, key, attr_name, legacy_scalar_name, count in candidates:
+    for term, key, attr_name, legacy_scalar_name, count, reference_key in candidates:
         if count < INTERACTION_COUNT_THRESHOLD:
+            continue
+        if reference_key is not None and key == reference_key:
             continue
         weight = _mapped_or_scalar(coefficients, attr_name, key, legacy_scalar_name)
         if weight is None:
@@ -460,9 +510,7 @@ def _update_early_terms(
         old_global = math.log(coefficients.global_multiplier)
     new_global = ((1 - EARLY_ETA_GLOBAL) * old_global) + (EARLY_ETA_GLOBAL * clamped_log_ratio)
 
-    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type, "task_type")
-    if old_type is None:
-        old_type = _type_prior(task_type)
+    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type, "task_type") or 0.0
     new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * clamped_log_ratio)
 
     return [
@@ -537,25 +585,21 @@ def fit_ridge_coefficients(
 ) -> dict:
     """raw history로 Ridge 계수를 재학습해 Spring 저장 term 형식으로 반환한다.
 
-    scikit-learn은 현재 프로젝트 의존성에 포함되어 있지 않다. 운영에서 이 함수를
-    사용하려면 `sklearn` 설치 후 호출하면 되고, 미설치 환경에서는 명확한 에러를
-    반환해 비동기 학습 작업이 실패 원인을 기록할 수 있게 한다.
-    """
+    Ridge는 `fit_intercept=True`를 유지하되 각 범주형 그룹에서 기준 카테고리
+    하나를 feature에서 제외한다. 따라서 intercept는 기준 조건의 기본 logRatio,
+    각 beta는 기준 카테고리 대비 차이로 해석된다.
 
-    try:
-        from sklearn.linear_model import Ridge
-    except ImportError as exc:  # pragma: no cover - 선택 의존성 안내
-        raise CalculationError(
-            "RIDGE_DEPENDENCY_MISSING",
-            "Ridge 재학습에는 scikit-learn 의존성이 필요합니다.",
-        ) from exc
+    scikit-learn이 있으면 sklearn Ridge를 사용하고, 현재 프로젝트처럼 선택
+    의존성이 없는 환경에서는 작은 학습 작업을 위한 순수 Python Ridge solver를
+    사용한다.
+    """
 
     if stage not in {STAGE_MAIN_EFFECT, STAGE_INTERACTION}:
         raise CalculationError("INVALID_STAGE", "Ridge 재학습은 MAIN_EFFECT 또는 INTERACTION 단계에서만 수행합니다.")
     if not history:
         raise CalculationError("EMPTY_HISTORY", "Ridge 재학습에는 history가 필요합니다.")
 
-    feature_names = _ridge_feature_names(history, stage)
+    feature_names, references = _ridge_feature_names_and_references(history, stage)
     rows = []
     targets = []
     for row in history:
@@ -567,13 +611,89 @@ def fit_ridge_coefficients(
         rows.append([1.0 if name in active else 0.0 for name in feature_names])
         targets.append(math.log(actual / estimated))
 
-    model = Ridge(alpha=alpha if alpha is not None else (0.5 if stage == STAGE_INTERACTION else 1.0), fit_intercept=True)
-    model.fit(rows, targets)
-    return _ridge_terms(feature_names, model.intercept_, model.coef_)
+    ridge_alpha = alpha if alpha is not None else (0.5 if stage == STAGE_INTERACTION else 1.0)
+    try:
+        from sklearn.linear_model import Ridge
+    except ImportError:
+        intercept, coefs = _fit_ridge_drop_reference(rows, targets, ridge_alpha)
+    else:  # pragma: no cover - 현재 프로젝트 기본 의존성에는 sklearn이 없다.
+        model = Ridge(alpha=ridge_alpha, fit_intercept=True)
+        model.fit(rows, targets)
+        intercept = float(model.intercept_)
+        coefs = [float(coef) for coef in model.coef_]
+    return _ridge_terms(feature_names, intercept, coefs, references)
 
 
 def _ridge_feature_names(history: Sequence[dict], stage: str) -> list[str]:
-    base_features: set[str] = set()
+    feature_names, _ = _ridge_feature_names_and_references(history, stage)
+    return feature_names
+
+
+def _ridge_feature_names_and_references(history: Sequence[dict], stage: str) -> tuple[list[str], dict[str, str | None]]:
+    if stage not in {STAGE_MAIN_EFFECT, STAGE_INTERACTION}:
+        raise CalculationError("INVALID_STAGE", "Ridge feature 생성은 MAIN_EFFECT 또는 INTERACTION 단계에서만 수행합니다.")
+
+    task_type_counts = _count_by_feature_prefix(history, "taskType")
+    difficulty_counts = _count_by_feature_prefix(history, "difficulty")
+    folder_counts = _count_by_feature_prefix(history, "folder")
+
+    references: dict[str, str | None] = {
+        "taskType": _select_most_common_reference(task_type_counts),
+        "difficulty": _select_difficulty_reference(difficulty_counts),
+        "folder": _select_most_common_reference(folder_counts),
+    }
+
+    features = (
+        _drop_reference_features(task_type_counts, references["taskType"])
+        + _drop_reference_features(difficulty_counts, references["difficulty"])
+        + _drop_reference_features(folder_counts, references["folder"])
+    )
+
+    if stage == STAGE_INTERACTION:
+        interaction_counts = _interaction_counts(history)
+        for group_name in ("taskTypeDifficulty", "taskTypeFolder", "folderDifficulty"):
+            ready_counts = {
+                key: count
+                for key, count in interaction_counts[group_name].items()
+                if count >= INTERACTION_COUNT_THRESHOLD
+            }
+            reference = _select_most_common_reference(ready_counts)
+            references[group_name] = reference
+            features.extend(_drop_reference_features(ready_counts, reference))
+
+    return sorted(features), references
+
+
+def _count_by_feature_prefix(history: Sequence[dict], prefix: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in history:
+        if prefix == "taskType":
+            key = f"taskType:{row['task_type']}"
+        elif prefix == "difficulty":
+            key = f"difficulty:{row['difficulty']}"
+        elif prefix == "folder":
+            key = f"folder:{row['folder_id']}"
+        else:
+            raise CalculationError("INVALID_FEATURE_PREFIX", "지원하지 않는 Ridge feature prefix입니다.")
+        _inc(counts, key)
+    return counts
+
+
+def _select_difficulty_reference(difficulty_counts: dict[str, int]) -> str | None:
+    if "difficulty:NORMAL" in difficulty_counts:
+        return "difficulty:NORMAL"
+    if "difficulty:MEDIUM" in difficulty_counts:
+        return "difficulty:MEDIUM"
+    return _select_most_common_reference(difficulty_counts)
+
+
+def _select_most_common_reference(counts: dict[str, int]) -> str | None:
+    if not counts:
+        return None
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def _interaction_counts(history: Sequence[dict]) -> dict[str, dict[str, int]]:
     td_counts: dict[str, int] = {}
     tf_counts: dict[str, int] = {}
     fd_counts: dict[str, int] = {}
@@ -581,26 +701,75 @@ def _ridge_feature_names(history: Sequence[dict], stage: str) -> list[str]:
         task_type = str(row["task_type"])
         difficulty = str(row["difficulty"])
         folder_id = str(row["folder_id"])
-        base_features.update((f"taskType:{task_type}", f"difficulty:{difficulty}", f"folder:{folder_id}"))
         _inc(td_counts, f"taskTypeDifficulty:{task_type}:{difficulty}")
         _inc(tf_counts, f"taskTypeFolder:{task_type}:{folder_id}")
         _inc(fd_counts, f"folderDifficulty:{folder_id}:{difficulty}")
+    return {
+        "taskTypeDifficulty": td_counts,
+        "taskTypeFolder": tf_counts,
+        "folderDifficulty": fd_counts,
+    }
 
-    features = sorted(base_features)
-    if stage == STAGE_INTERACTION:
-        features.extend(_ready_interactions(td_counts, tf_counts, fd_counts))
-    return features
+
+def _drop_reference_features(feature_counts: dict[str, int], reference_key: str | None) -> list[str]:
+    return sorted(key for key in feature_counts if key != reference_key)
+
+
+def _fit_ridge_drop_reference(rows: list[list[float]], targets: list[float], alpha: float) -> tuple[float, list[float]]:
+    """sklearn이 없을 때 쓰는 작은 Ridge solver.
+
+    첫 번째 열은 intercept라 정규화하지 않고, 나머지 feature 열에만 alpha를 더한다.
+    """
+
+    if not rows:
+        raise CalculationError("EMPTY_HISTORY", "Ridge 재학습에는 history가 필요합니다.")
+
+    feature_count = len(rows[0])
+    size = feature_count + 1
+    matrix = [[0.0 for _ in range(size)] for _ in range(size)]
+    vector = [0.0 for _ in range(size)]
+
+    for row, target in zip(rows, targets, strict=True):
+        design = [1.0, *row]
+        for i, left in enumerate(design):
+            vector[i] += left * target
+            for j, right in enumerate(design):
+                matrix[i][j] += left * right
+
+    for i in range(1, size):
+        matrix[i][i] += alpha
+
+    solution = _solve_linear_system(matrix, vector)
+    return solution[0], solution[1:]
+
+
+def _solve_linear_system(matrix: list[list[float]], vector: list[float]) -> list[float]:
+    size = len(vector)
+    augmented = [row[:] + [vector[i]] for i, row in enumerate(matrix)]
+
+    for pivot_idx in range(size):
+        pivot_row = max(range(pivot_idx, size), key=lambda row_idx: abs(augmented[row_idx][pivot_idx]))
+        if abs(augmented[pivot_row][pivot_idx]) < 1e-12:
+            raise CalculationError("RIDGE_SOLVER_FAILED", "Ridge 선형 시스템을 풀 수 없습니다.")
+        augmented[pivot_idx], augmented[pivot_row] = augmented[pivot_row], augmented[pivot_idx]
+
+        pivot = augmented[pivot_idx][pivot_idx]
+        augmented[pivot_idx] = [value / pivot for value in augmented[pivot_idx]]
+
+        for row_idx in range(size):
+            if row_idx == pivot_idx:
+                continue
+            factor = augmented[row_idx][pivot_idx]
+            augmented[row_idx] = [
+                value - (factor * pivot_value)
+                for value, pivot_value in zip(augmented[row_idx], augmented[pivot_idx], strict=True)
+            ]
+
+    return [row[-1] for row in augmented]
 
 
 def _inc(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
-
-
-def _ready_interactions(*groups: dict[str, int]) -> list[str]:
-    names: list[str] = []
-    for group in groups:
-        names.extend(key for key, count in group.items() if count >= INTERACTION_COUNT_THRESHOLD)
-    return sorted(names)
 
 
 def _active_feature_keys(row: dict, stage: str, feature_names: Iterable[str]) -> set[str]:
@@ -623,11 +792,24 @@ def _active_feature_keys(row: dict, stage: str, feature_names: Iterable[str]) ->
     return active.intersection(set(feature_names))
 
 
-def _ridge_terms(feature_names: list[str], intercept: float, coefficients: Sequence[float]) -> dict:
+def _ridge_terms(
+    feature_names: list[str],
+    intercept: float,
+    coefficients: Sequence[float],
+    references: dict[str, str | None],
+) -> dict:
     terms = [{"term": "BETA_INTERCEPT", "key": "global", "weight": float(intercept)}]
     for name, weight in zip(feature_names, coefficients, strict=True):
         terms.append({"term": _term_type_from_feature_name(name), "key": name, "weight": float(weight)})
-    return {"modelVersion": MODEL_VERSION, "terms": terms}
+    return {
+        "modelVersion": MODEL_VERSION,
+        "encoding": {
+            "fitIntercept": True,
+            "dropReferenceCategory": True,
+            "references": references,
+        },
+        "terms": terms,
+    }
 
 
 def _term_type_from_feature_name(name: str) -> str:
