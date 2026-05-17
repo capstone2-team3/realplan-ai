@@ -71,6 +71,51 @@ def _coefficient_or_reference_zero(
     return prior, False
 
 
+def _system_global_prior(coefficients: CoefficientsPayload) -> float | None:
+    """앱 전체 통계 기반 global prior를 읽는다."""
+
+    return _mapped_or_scalar(coefficients, "system_global_prior", "global")
+
+
+def _system_type_effect(coefficients: CoefficientsPayload, task_type_key: str) -> float:
+    """systemGlobalPrior 대비 taskType 추가 효과를 읽는다."""
+
+    return _mapped_or_scalar(coefficients, "system_type_effect", task_type_key) or 0.0
+
+
+def _system_difficulty_effect(coefficients: CoefficientsPayload, difficulty_key: str) -> float:
+    """systemGlobalPrior 대비 difficulty 추가 효과를 읽는다."""
+
+    return _mapped_or_scalar(coefficients, "system_difficulty_effect", difficulty_key) or 0.0
+
+
+def _user_global_or_system_fallback(coefficients: CoefficientsPayload) -> float:
+    """사용자 global 계수 → system prior → globalMultiplier 순서로 global log 값을 선택한다."""
+
+    user_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
+    if user_global is not None:
+        return user_global
+    system_global = _system_global_prior(coefficients)
+    if system_global is not None:
+        return system_global
+    return math.log(coefficients.global_multiplier)
+
+
+def _intercept_with_early_fallback(coefficients: CoefficientsPayload) -> float:
+    """MAIN_EFFECT 전환 직후 예측이 튀지 않도록 EARLY global 값을 이어받는다."""
+
+    beta_intercept = _mapped_or_scalar(coefficients, "beta_intercept", "global")
+    if beta_intercept is not None:
+        return beta_intercept
+    user_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
+    if user_global is not None:
+        return user_global
+    system_global = _system_global_prior(coefficients)
+    if system_global is not None:
+        return system_global
+    return math.log(coefficients.global_multiplier)
+
+
 def _type_prior(task_type: str) -> float:
     try:
         multiplier = BASE_TYPE_MULTIPLIER[TaskType(task_type)]

@@ -11,7 +11,12 @@ from typing import Any
 
 from app.schemas.predict import CoefficientsPayload, CountsPayload
 from app.schemas.update import UpdateRequest
-from app.services.planning_model.coefficients import _mapped_or_scalar
+from app.services.planning_model.coefficients import (
+    _mapped_or_scalar,
+    _system_difficulty_effect,
+    _system_type_effect,
+    _user_global_or_system_fallback,
+)
 from app.services.planning_model.constants import (
     EARLY_ETA_GLOBAL,
     EARLY_ETA_TYPE,
@@ -74,8 +79,8 @@ def update_coefficients(req: UpdateRequest) -> dict:
         "stage": stage,
         "error": _observation(task, ratio, log_ratio, clamped_log_ratio),
         "observation": _observation(task, ratio, log_ratio, clamped_log_ratio),
-        "historyRecord": _history_record(task, log_ratio),
-        "historyAppend": _history_record(task, log_ratio),
+        "historyRecord": _history_record(task, log_ratio, clamped_log_ratio),
+        "historyAppend": _history_record(task, log_ratio, clamped_log_ratio),
         "updatedTerms": updated_terms,
         "countIncrements": _count_increments(task.folder_id, task.difficulty, task.task_type),
         "retrainRequired": _retrain_required(stage, counts.completed_since_last_train),
@@ -88,15 +93,21 @@ def _update_early_terms(
     keys: TaskKeys,
     clamped_log_ratio: float,
 ) -> list[dict]:
-    """초기 단계의 global/type 로그 계수를 EMA 방식으로 갱신한다."""
+    """초기 단계의 userGlobal/userTypeEffect를 EMA 방식으로 갱신한다.
 
-    old_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
-    if old_global is None:
-        old_global = math.log(coefficients.global_multiplier)
+    userTypeEffect는 전체 taskType 효과가 아니라 userGlobal과 system prior로
+    설명되지 않는 개인별 type residual을 학습한다.
+    """
+
+    old_global = _user_global_or_system_fallback(coefficients)
     new_global = ((1 - EARLY_ETA_GLOBAL) * old_global) + (EARLY_ETA_GLOBAL * clamped_log_ratio)
 
     old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type) or 0.0
-    new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * clamped_log_ratio)
+    system_type_effect = _system_type_effect(coefficients, keys.task_type)
+    system_difficulty_effect = _system_difficulty_effect(coefficients, keys.difficulty)
+    baseline_without_user_type = old_global + system_type_effect + system_difficulty_effect
+    type_residual = clamped_log_ratio - baseline_without_user_type
+    new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * type_residual)
 
     return [
         _updated_term(
@@ -113,6 +124,8 @@ def _update_early_terms(
             new_type,
             "EMA_LOG_RATIO",
             reliability=_shrinkage(counts.task_type),
+            residual=type_residual,
+            baselineWithoutUserType=baseline_without_user_type,
         ),
     ]
 
@@ -128,7 +141,7 @@ def _observation(task: Any, ratio: float, log_ratio: float, clamped_log_ratio: f
     }
 
 
-def _history_record(task: Any, log_ratio: float) -> dict:
+def _history_record(task: Any, log_ratio: float, clamped_log_ratio: float) -> dict:
     """Spring이 그대로 저장할 수 있는 raw 학습 이력 포맷을 만든다."""
 
     return {
@@ -137,6 +150,7 @@ def _history_record(task: Any, log_ratio: float) -> dict:
         "predicted_minutes": task.predicted_minutes,
         "actual_minutes": task.actual_minutes,
         "log_ratio": log_ratio,
+        "clamped_log_ratio": clamped_log_ratio,
         "task_type": task.task_type,
         "difficulty": task.difficulty,
         "folder_id": task.folder_id,

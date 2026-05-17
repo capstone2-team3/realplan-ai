@@ -203,7 +203,7 @@ logCorrection = clamp(단계별 log 보정항 합계)
 
 단계별 사용 항:
 
-- `EARLY`: `logAlphaGlobal`, `logAlphaType`, 난이도 prior
+- `EARLY`: `userGlobal`, `systemTypeEffect`, `systemDifficultyEffect`, `userTypeEffect`
 - `MAIN_EFFECT`: `betaIntercept`, `betaType`, `betaDifficulty`, `betaFolder`
 - `INTERACTION`: `MAIN_EFFECT` 항 + 준비된 상호작용항
 
@@ -245,7 +245,7 @@ logRatio = log(actualMinutes / estimatedMinutes)
 clampedLogRatio = clamp(logRatio, log(0.5), log(2.0))
 
 EARLY:
-logAlphaGlobal, logAlphaType을 EMA로 업데이트
+사용자 개인 logAlphaGlobal, logAlphaType residual을 EMA로 업데이트
 
 MAIN_EFFECT / INTERACTION:
 raw history append와 retrainRequired 여부를 반환
@@ -314,7 +314,8 @@ CandidateTask 목록
 
 `/v1/predict`, `/v1/update`의 보정계수는 두 종류입니다.
 
-- `logAlphaGlobal`, `logAlphaType`: `EARLY`에서 사용하는 로그 보정 계수입니다.
+- `systemGlobalPrior`, `systemTypeEffect`, `systemDifficultyEffect`: 전체 사용자 통계 기반 system prior입니다.
+- `logAlphaGlobal`, `logAlphaType`: `EARLY`에서 개인별로 보정되는 로그 계수입니다.
 - `betaIntercept`, `betaType`, `betaDifficulty`, `betaFolder`, 상호작용항: `MAIN_EFFECT` 이상에서 사용하는 로그 보정 계수입니다.
 
 로그 계수는 더해서 `logCorrection`을 만들고, 최종 배율은 `exp(logCorrection)`으로 계산합니다.
@@ -341,7 +342,7 @@ CandidateTask 목록
 
 - 단계 선택 경계
 - 사용자 유형 프로필의 EMA 기반 갱신
-- `EARLY` 예측의 global/type/difficulty prior 반영
+- `EARLY` 예측의 system prior와 개인 residual 반영
 - `MAIN_EFFECT` 예측의 shrinkage 반영
 - `INTERACTION` 예측의 준비된 상호작용항 반영
 - reference category encoding

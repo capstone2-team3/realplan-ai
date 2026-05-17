@@ -20,6 +20,7 @@ def _updated_term(
     new_weight: float,
     update_method: str,
     reliability: float | None = None,
+    **extra: float,
 ) -> dict:
     out = {
         "term": term,
@@ -31,4 +32,5 @@ def _updated_term(
     }
     if reliability is not None:
         out["reliability"] = reliability
+    out.update(extra)
     return out

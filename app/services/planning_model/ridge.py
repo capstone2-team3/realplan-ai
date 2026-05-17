@@ -12,10 +12,14 @@ from collections.abc import Iterable, Sequence
 from app.services.planning_model.constants import (
     INTERACTION_COUNT_THRESHOLD,
     MODEL_VERSION,
+    OBSERVATION_LOG_MAX,
+    OBSERVATION_LOG_MIN,
     STAGE_INTERACTION,
     STAGE_MAIN_EFFECT,
+    SYSTEM_PRIOR_SHRINKAGE_DENOMINATOR,
 )
 from app.services.planning_model.errors import CalculationError
+from app.services.planning_model.stages import _clip
 
 
 def fit_ridge_coefficients(
@@ -66,9 +70,83 @@ def fit_ridge_coefficients(
     return _ridge_terms(feature_names, intercept, coefs, references)
 
 
+def fit_system_priors(history: Sequence[dict]) -> dict:
+    """전체 사용자 완료 기록으로 system prior를 계산한다.
+
+    systemTypeEffect와 systemDifficultyEffect는 전체 효과가 아니라
+    systemGlobalPrior 대비 추가 효과다. 개인 완료 시 즉시 업데이트하지 않고,
+    별도 배치에서 모든 완료 기록을 모아 이 함수를 호출해 재계산한다.
+    """
+
+    if not history:
+        raise CalculationError("EMPTY_HISTORY", "system prior 계산에는 history가 필요합니다.")
+
+    global_values: list[float] = []
+    type_values: dict[str, list[float]] = {}
+    difficulty_values: dict[str, list[float]] = {}
+
+    for row in history:
+        estimated = float(row["estimated_minutes"])
+        actual = float(row["actual_minutes"])
+        if estimated <= 0 or actual <= 0:
+            raise CalculationError("INVALID_HISTORY_MINUTES", "history의 estimated/actual minutes는 0보다 커야 합니다.")
+
+        clamped_log_ratio = _clip(math.log(actual / estimated), OBSERVATION_LOG_MIN, OBSERVATION_LOG_MAX)
+        task_type_key = f"taskType:{row['task_type']}"
+        difficulty_key = f"difficulty:{row['difficulty']}"
+
+        global_values.append(clamped_log_ratio)
+        type_values.setdefault(task_type_key, []).append(clamped_log_ratio)
+        difficulty_values.setdefault(difficulty_key, []).append(clamped_log_ratio)
+
+    global_prior = _mean(global_values)
+    terms = [
+        {
+            "term": "SYSTEM_GLOBAL_PRIOR",
+            "key": "global",
+            "weight": global_prior,
+            "sampleCount": len(global_values),
+        }
+    ]
+
+    for key, values in sorted(type_values.items()):
+        terms.append(_system_effect_term("SYSTEM_TYPE_EFFECT", key, values, global_prior))
+
+    for key, values in sorted(difficulty_values.items()):
+        terms.append(_system_effect_term("SYSTEM_DIFFICULTY_EFFECT", key, values, global_prior))
+
+    return {
+        "modelVersion": MODEL_VERSION,
+        "statistic": "MEAN_CLAMPED_LOG_RATIO",
+        "clamp": {
+            "min": OBSERVATION_LOG_MIN,
+            "max": OBSERVATION_LOG_MAX,
+        },
+        "terms": terms,
+    }
+
+
 def _ridge_feature_names(history: Sequence[dict], stage: str) -> list[str]:
     feature_names, _ = _ridge_feature_names_and_references(history, stage)
     return feature_names
+
+
+def _mean(values: Sequence[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _system_effect_term(term: str, key: str, values: Sequence[float], global_prior: float) -> dict:
+    sample_count = len(values)
+    raw_effect = _mean(values) - global_prior
+    shrinkage = sample_count / (sample_count + SYSTEM_PRIOR_SHRINKAGE_DENOMINATOR)
+    return {
+        "term": term,
+        "key": key,
+        "weight": shrinkage * raw_effect,
+        "sampleCount": sample_count,
+        "rawEffect": raw_effect,
+        "shrinkage": shrinkage,
+    }
 
 
 def _ridge_feature_names_and_references(history: Sequence[dict], stage: str) -> tuple[list[str], dict[str, str | None]]:

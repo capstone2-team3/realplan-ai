@@ -47,6 +47,8 @@ class UpdatedTerm(BaseModel):
     new_weight: float = Field(..., alias="newWeight")
     delta: float
     update_method: str | None = Field(default=None, alias="updateMethod")
+    residual: float | None = None
+    baseline_without_user_type: float | None = Field(default=None, alias="baselineWithoutUserType")
     reliability: float | None = None
 
 
@@ -68,6 +70,7 @@ class HistoryRecord(BaseModel):
     predicted_minutes: int
     actual_minutes: int
     log_ratio: float
+    clamped_log_ratio: float | None = None
     task_type: str
     difficulty: str
     folder_id: int

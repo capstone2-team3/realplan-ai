@@ -19,6 +19,9 @@ class CoefficientsPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     global_multiplier: float = Field(1.0, alias="globalMultiplier")
+    system_global_prior: float | dict[str, float] | None = Field(default=None, alias="systemGlobalPrior")
+    system_type_effect: float | dict[str, float] | None = Field(default=None, alias="systemTypeEffect")
+    system_difficulty_effect: float | dict[str, float] | None = Field(default=None, alias="systemDifficultyEffect")
     log_alpha_global: float | dict[str, float] | None = Field(default=None, alias="logAlphaGlobal")
     log_alpha_type: float | dict[str, float] | None = Field(default=None, alias="logAlphaType")
     beta_intercept: float | dict[str, float] | None = Field(default=None, alias="betaIntercept")

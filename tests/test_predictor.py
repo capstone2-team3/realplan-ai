@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from app.schemas.predict import PredictRequest
 from app.schemas.update import UpdateRequest
 from app.services.classifier import TaskType
@@ -14,6 +16,7 @@ from app.services.planning_model import (
     _ridge_feature_names_and_references,
     _select_prediction_stage,
     fit_ridge_coefficients,
+    fit_system_priors,
     update_user_profile,
 )
 from app.services.planning_model.priors import BASE_TYPE_MULTIPLIER
@@ -22,6 +25,7 @@ from app.services.updater import update_coefficients
 
 
 class TestSelectStage:
+    # 완료 태스크 개수에 따른 모델 stage 경계를 확인
     def test_select_stage_boundaries(self):
         cases = (
             (0, "EARLY"),
@@ -133,24 +137,40 @@ def _update_payload(total_completed: int) -> dict:
 
 
 class TestPredictCoefficientLogic:
-    def test_early_uses_global_type_and_difficulty_prior(self):
+    def test_early_uses_user_global_system_priors_and_user_type_effect(self):
         payload = _predict_payload(total_completed=10)
         payload["task"]["estimatedMinutes"] = 100
         payload["task"]["taskType"] = "SATISFACTION_BOUND"
         payload["coefficients"]["logAlphaGlobal"] = math.log(1.1)
         payload["coefficients"]["logAlphaType"] = math.log(1.2)
+        payload["coefficients"]["systemTypeEffect"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
         payload["counts"]["taskType"] = 5
         out = _predict_result(payload)
         r_type = 5 / 15
-        expected_log = math.log(1.1) + (r_type * math.log(1.2)) + math.log(1.2)
+        expected_log = math.log(1.1) + 0.10 + 0.18 + (r_type * math.log(1.2))
         assert out["stage"] == "EARLY"
         assert out["logCorrection"] == expected_log
         assert out["predictedMinutes"] == round(100 * math.exp(expected_log))
         assert [term["term"] for term in out["usedTerms"]] == [
-            "logAlphaGlobal",
-            "logAlphaType",
-            "difficultyPrior",
+            "userGlobal",
+            "systemTypeEffect",
+            "systemDifficultyEffect",
+            "userTypeEffect",
         ]
+
+    def test_early_falls_back_to_system_global_prior_for_new_user(self):
+        payload = _predict_payload(total_completed=10)
+        payload["task"]["estimatedMinutes"] = 100
+        payload["task"]["taskType"] = "SATISFACTION_BOUND"
+        payload["coefficients"]["systemGlobalPrior"] = {"global": 0.14}
+        payload["coefficients"]["systemTypeEffect"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
+        payload["counts"]["taskType"] = 0
+        out = _predict_result(payload)
+
+        assert out["logCorrection"] == pytest.approx(0.42)
+        assert out["predictedMinutes"] == round(100 * math.exp(0.42))
 
     def test_main_effect_sums_terms_with_folder_shrinkage(self):
         payload = _predict_payload(total_completed=80)
@@ -173,6 +193,17 @@ class TestPredictCoefficientLogic:
         assert folder_term["reliability"] == 1 / 11
         assert folder_term["contribution"] == expected_folder
         assert out["logCorrection"] > expected_folder
+
+    def test_main_effect_intercept_falls_back_to_early_global(self):
+        payload = _predict_payload(total_completed=50)
+        del payload["coefficients"]["betaIntercept"]
+        payload["coefficients"]["logAlphaGlobal"] = 0.22
+
+        out = _predict_result(payload)
+        intercept_term = next(term for term in out["usedTerms"] if term["term"] == "betaIntercept")
+
+        assert out["stage"] == "MAIN_EFFECT"
+        assert intercept_term["weight"] == 0.22
 
     def test_interaction_uses_only_ready_interactions(self):
         payload = _predict_payload(total_completed=250)
@@ -224,19 +255,30 @@ class TestUpdateCoefficientLogic:
         assert out["error"]["actualOverEstimatedRatio"] == expected_ratio
         assert out["error"]["logRatio"] == math.log(expected_ratio)
         assert out["historyRecord"]["log_ratio"] == math.log(expected_ratio)
+        assert out["historyRecord"]["clamped_log_ratio"] == math.log(expected_ratio)
         assert out["historyRecord"]["predicted_minutes"] == 82
 
     def test_early_updates_ema_log_terms(self):
         payload = _update_payload(total_completed=10)
-        payload["coefficients"]["logAlphaGlobal"] = math.log(1.1)
-        payload["coefficients"]["logAlphaType"] = math.log(1.2)
+        old_global = 0.14
+        payload["coefficients"]["logAlphaGlobal"] = old_global
+        payload["coefficients"]["logAlphaType"] = 0.0
+        payload["coefficients"]["systemTypeEffect"] = {"taskType:SCOPE_BOUND": 0.10}
+        payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
         out = _update_result(payload)
+        expected_log_ratio = math.log(95 / 60)
+        expected_baseline = old_global + 0.10 + 0.18
+        expected_residual = expected_log_ratio - expected_baseline
 
         assert [term["term"] for term in out["updatedTerms"]] == [
             "LOG_ALPHA_GLOBAL",
             "LOG_ALPHA_TYPE",
         ]
         assert all(term["updateMethod"] == "EMA_LOG_RATIO" for term in out["updatedTerms"])
+        type_term = out["updatedTerms"][1]
+        assert type_term["baselineWithoutUserType"] == expected_baseline
+        assert type_term["residual"] == expected_residual
+        assert type_term["newWeight"] == 0.15 * expected_residual
 
     def test_main_effect_retrain_required_every_10_records(self):
         payload = _update_payload(total_completed=80)
@@ -307,7 +349,7 @@ class TestRidgeDropReferenceEncoding:
         ]
         out = fit_ridge_coefficients(history, "MAIN_EFFECT")
 
-        assert out["modelVersion"] == "v2.1.0"
+        assert out["modelVersion"] == "v2.2.0"
         assert out["encoding"]["fitIntercept"] is True
         assert out["encoding"]["dropReferenceCategory"] is True
         assert out["encoding"]["references"]["difficulty"] == "difficulty:NORMAL"
@@ -325,3 +367,29 @@ class TestRidgeDropReferenceEncoding:
         assert "taskTypeDifficulty:A:NORMAL" not in feature_names
         assert "taskTypeDifficulty:B:HARD" in feature_names
         assert "taskTypeDifficulty:C:HARD" not in feature_names
+
+
+class TestSystemPriorFit:
+    def test_fit_system_priors_uses_mean_clamped_log_ratio_and_shrinkage(self):
+        history = [
+            _history_row("A", "NORMAL", 1, 100),
+            _history_row("A", "HARD", 1, 200),
+            _history_row("B", "HARD", 2, 400),
+        ]
+
+        out = fit_system_priors(history)
+        global_term = next(term for term in out["terms"] if term["term"] == "SYSTEM_GLOBAL_PRIOR")
+        type_a = next(term for term in out["terms"] if term["key"] == "taskType:A")
+        hard = next(term for term in out["terms"] if term["key"] == "difficulty:HARD")
+        values = [0.0, math.log(2), math.log(4)]
+        expected_global = sum(values) / 3
+        expected_type_a_raw = ((values[0] + values[1]) / 2) - expected_global
+        expected_hard_raw = ((values[1] + values[2]) / 2) - expected_global
+
+        assert out["modelVersion"] == "v2.2.0"
+        assert out["statistic"] == "MEAN_CLAMPED_LOG_RATIO"
+        assert global_term["weight"] == expected_global
+        assert type_a["rawEffect"] == expected_type_a_raw
+        assert type_a["weight"] == (2 / 52) * expected_type_a_raw
+        assert hard["rawEffect"] == expected_hard_raw
+        assert hard["weight"] == (2 / 52) * expected_hard_raw

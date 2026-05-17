@@ -13,8 +13,12 @@ from app.services.planning_model.coefficients import (
     _coefficient_or_reference_zero,
     _difficulty_prior,
     _encoding_references,
+    _intercept_with_early_fallback,
     _mapped_or_scalar,
+    _system_difficulty_effect,
+    _system_type_effect,
     _type_prior,
+    _user_global_or_system_fallback,
 )
 from app.services.planning_model.constants import (
     INTERACTION_COUNT_THRESHOLD,
@@ -53,8 +57,6 @@ def calculate_prediction(req: PredictRequest) -> dict:
             coefficients,
             counts,
             keys,
-            task.difficulty,
-            task.task_type,
         )
     else:
         raw_log_correction, used_terms = _calculate_main_effect_log_correction(
@@ -98,35 +100,32 @@ def _calculate_early_log_correction(
     coefficients: CoefficientsPayload,
     counts: CountsPayload,
     keys: TaskKeys,
-    difficulty: str,
-    task_type: str,
 ) -> tuple[float, list[dict]]:
     """초기 단계 보정값을 계산한다.
 
-    global 계수는 항상 반영하고, taskType 계수는 관측 수에 따른 shrinkage를 곱한다.
-    difficulty는 학습 데이터가 적을 때도 안정적인 기본 prior로 보정한다.
+    systemTypeEffect/systemDifficultyEffect는 systemGlobalPrior 대비 추가 효과이고,
+    userTypeEffect는 system prior와 userGlobal로 설명되지 않는 개인 잔차다.
     """
 
-    log_alpha_global = _mapped_or_scalar(coefficients, "log_alpha_global", "global")
-    if log_alpha_global is None:
-        log_alpha_global = math.log(coefficients.global_multiplier)
-
-    log_alpha_type = _mapped_or_scalar(
+    user_global = _user_global_or_system_fallback(coefficients)
+    system_type_effect = _system_type_effect(coefficients, keys.task_type)
+    system_difficulty_effect = _system_difficulty_effect(coefficients, keys.difficulty)
+    user_type_effect = _mapped_or_scalar(
         coefficients,
         "log_alpha_type",
         keys.task_type,
     )
-    if log_alpha_type is None:
-        log_alpha_type = _type_prior(task_type)
+    if user_type_effect is None:
+        user_type_effect = 0.0
 
     r_type = _shrinkage(counts.task_type)
-    difficulty_prior = _difficulty_prior(difficulty)
     return (
-        log_alpha_global + (r_type * log_alpha_type) + difficulty_prior,
+        user_global + system_type_effect + system_difficulty_effect + (r_type * user_type_effect),
         [
-            _term("logAlphaGlobal", "global", log_alpha_global, 1.0, log_alpha_global),
-            _term("logAlphaType", keys.task_type, log_alpha_type, r_type, r_type * log_alpha_type),
-            _term("difficultyPrior", keys.difficulty, difficulty_prior, 1.0, difficulty_prior),
+            _term("userGlobal", "global", user_global, 1.0, user_global),
+            _term("systemTypeEffect", keys.task_type, system_type_effect, 1.0, system_type_effect),
+            _term("systemDifficultyEffect", keys.difficulty, system_difficulty_effect, 1.0, system_difficulty_effect),
+            _term("userTypeEffect", keys.task_type, user_type_effect, r_type, r_type * user_type_effect),
         ],
     )
 
@@ -143,18 +142,24 @@ def _calculate_main_effect_log_correction(
     used_terms: list[dict] = []
     references = _encoding_references(coefficients)
 
-    beta_intercept = _mapped_or_scalar(coefficients, "beta_intercept", "global") or 0.0
+    beta_intercept = _intercept_with_early_fallback(coefficients)
     used_terms.append(_term("betaIntercept", "global", beta_intercept, 1.0, beta_intercept))
     log_correction = beta_intercept
+    type_prior = _mapped_or_scalar(coefficients, "system_type_effect", keys.task_type)
+    if type_prior is None:
+        type_prior = _type_prior(task_type)
+    difficulty_prior = _mapped_or_scalar(coefficients, "system_difficulty_effect", keys.difficulty)
+    if difficulty_prior is None:
+        difficulty_prior = _difficulty_prior(difficulty)
 
     candidates = (
-        ("betaType", keys.task_type, "beta_type", counts.task_type, _type_prior(task_type), references.get("taskType")),
+        ("betaType", keys.task_type, "beta_type", counts.task_type, type_prior, references.get("taskType")),
         (
             "betaDifficulty",
             keys.difficulty,
             "beta_difficulty",
             counts.difficulty,
-            _difficulty_prior(difficulty),
+            difficulty_prior,
             references.get("difficulty"),
         ),
         ("betaFolder", keys.folder, "beta_folder", counts.folder, 0.0, references.get("folder")),

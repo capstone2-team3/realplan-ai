@@ -9,6 +9,7 @@ from app.services.planning_model.ridge import (
     _ridge_feature_names,
     _ridge_feature_names_and_references,
     fit_ridge_coefficients,
+    fit_system_priors,
 )
 from app.services.planning_model.stages import _clip, _select_prediction_stage
 
@@ -22,5 +23,6 @@ __all__ = [
     "_ridge_feature_names_and_references",
     "_select_prediction_stage",
     "fit_ridge_coefficients",
+    "fit_system_priors",
     "update_user_profile",
 ]

@@ -78,9 +78,10 @@ def test_predict_early_uses_common_success_format(client):
     data = _ok(res.json())
     assert data["stage"] == "EARLY"
     assert [term["term"] for term in data["usedTerms"]] == [
-        "logAlphaGlobal",
-        "logAlphaType",
-        "difficultyPrior",
+        "userGlobal",
+        "systemTypeEffect",
+        "systemDifficultyEffect",
+        "userTypeEffect",
     ]
 
 
