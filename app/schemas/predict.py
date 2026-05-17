@@ -1,26 +1,89 @@
-"""/predict 엔드포인트 DTO."""
+"""/v1/predict 엔드포인트 DTO."""
 
 from __future__ import annotations
 
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field
 
-from pydantic import BaseModel, Field
 
-from app.services.classifier import TaskType
+class TaskPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_id: int = Field(..., alias="taskId")
+    estimated_minutes: int = Field(..., alias="estimatedMinutes")
+    folder_id: int = Field(..., alias="folderId")
+    difficulty: str
+    task_type: str = Field(..., alias="taskType")
+
+
+class CoefficientsPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    bias: float = 0.0
+    global_multiplier: float = Field(1.0, alias="globalMultiplier")
+    folder: float | None = None
+    difficulty: float | None = None
+    task_type: float | None = Field(default=None, alias="taskType")
+    folder_difficulty: float | None = Field(default=None, alias="folderDifficulty")
+    folder_type: float | None = Field(default=None, alias="folderType")
+    difficulty_type: float | None = Field(default=None, alias="difficultyType")
+    log_alpha_global: float | dict[str, float] | None = Field(default=None, alias="logAlphaGlobal")
+    log_alpha_type: float | dict[str, float] | None = Field(default=None, alias="logAlphaType")
+    beta_intercept: float | dict[str, float] | None = Field(default=None, alias="betaIntercept")
+    beta_type: float | dict[str, float] | None = Field(default=None, alias="betaType")
+    beta_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaDifficulty")
+    beta_folder: float | dict[str, float] | None = Field(default=None, alias="betaFolder")
+    beta_type_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaTypeDifficulty")
+    beta_type_folder: float | dict[str, float] | None = Field(default=None, alias="betaTypeFolder")
+    beta_folder_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaFolderDifficulty")
+
+
+class CountsPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_completed: int = Field(0, alias="totalCompleted")
+    folder: int = 0
+    difficulty: int = 0
+    task_type: int = Field(0, alias="taskType")
+    folder_difficulty: int = Field(0, alias="folderDifficulty")
+    folder_type: int = Field(0, alias="folderType")
+    difficulty_type: int = Field(0, alias="difficultyType")
+    task_type_difficulty: int = Field(0, alias="taskTypeDifficulty")
+    task_type_folder: int = Field(0, alias="taskTypeFolder")
+    completed_since_last_train: int = Field(0, alias="completedSinceLastTrain")
 
 
 class PredictRequest(BaseModel):
-    task_type: TaskType
-    user_estimate_min: int = Field(..., gt=0, description="사용자 예상 시간(분)")
-    difficulty: str = Field("MEDIUM", description="EASY | MEDIUM | HARD | UNKNOWN")
-    user_multiplier: Optional[float] = Field(
-        default=None,
-        description="이 사용자의 해당 유형 학습된 보정 계수. None이면 Cold Start.",
-    )
+    model_config = ConfigDict(populate_by_name=True)
+
+    task: TaskPayload
+    coefficients: CoefficientsPayload = Field(default_factory=CoefficientsPayload)
+    counts: CountsPayload = Field(default_factory=CountsPayload)
+
+
+class UsedTerm(BaseModel):
+    term: str
+    key: str
+    weight: float
+    reliability: float
+    contribution: float
+
+
+class PredictPolicy(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    min_log_correction: float | None = Field(..., alias="minLogCorrection")
+    max_log_correction: float | None = Field(..., alias="maxLogCorrection")
+    model_version: str = Field(..., alias="modelVersion")
 
 
 class PredictResponse(BaseModel):
-    corrected_min: int
-    multiplier_used: float
-    is_cold_start: bool
-    breakdown: dict
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_id: int = Field(..., alias="taskId")
+    estimated_minutes: int = Field(..., alias="estimatedMinutes")
+    predicted_minutes: int = Field(..., alias="predictedMinutes")
+    correction_multiplier: float = Field(..., alias="correctionMultiplier")
+    log_correction: float = Field(..., alias="logCorrection")
+    stage: str
+    used_terms: list[UsedTerm] = Field(..., alias="usedTerms")
+    policy: PredictPolicy

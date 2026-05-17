@@ -3,13 +3,12 @@ RealPlan AI Service — FastAPI 엔트리.
 
 실행:
   uv run uvicorn app.main:app --reload --port 8000
-  → http://localhost:8000/docs 에서 Swagger UI 확인 가능
 """
 
 from __future__ import annotations
 
 # 환경변수 로드를 가장 먼저
-from app.core import config  # noqa: F401
+from app.core import config 
 
 from fastapi import FastAPI, Request
 

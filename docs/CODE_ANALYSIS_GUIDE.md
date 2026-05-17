@@ -4,7 +4,13 @@
 
 ## 1. 프로젝트 한 줄 요약
 
-RealPlan AI Service는 학습 계획에서 자주 발생하는 계획 오류를 보정하기 위한 FastAPI 기반 AI/ML 모듈입니다. Java Spring 백엔드가 HTTP로 이 서비스에 요청하면, 이 서비스는 태스크 분류, 예상 시간 보정, 사용자 보정 계수 갱신, 오늘의 학습 조합 추천을 수행합니다.
+RealPlan AI Service는 학습 계획에서 자주 발생하는 계획 오류를 보정하기 위한 FastAPI 기반 AI/ML 모듈입니다. Java Spring 백엔드가 HTTP로 이 서비스에 요청하면, 이 서비스는 태스크 분류, 예상 시간 계산, 보정계수 갱신값 계산, 오늘의 학습 조합 추천을 수행합니다.
+
+중요한 경계는 다음과 같습니다.
+
+- DB 접근, 인증, Task CRUD, 보정계수 저장은 Java Spring 백엔드가 담당합니다.
+- FastAPI는 Spring이 넘겨준 request body만 사용해 계산하고 결과를 반환하는 stateless 계산 서버입니다.
+- `/v1/predict`, `/v1/update`에서 ORM, SQLAlchemy, repository 계층을 추가하면 안 됩니다.
 
 큰 흐름은 다음과 같습니다.
 
@@ -61,6 +67,13 @@ app/
   services/
     predictor.py
     scheduler.py
+    estimator/
+      base.py
+      blend.py
+      regression.py
+      advanced.py
+      selector.py
+      updater.py
     classifier/
       __init__.py
       core.py
@@ -121,7 +134,7 @@ FastAPI 애플리케이션의 시작점입니다.
 FastAPI 예외를 공통 실패 응답으로 변환합니다.
 
 - `HTTPException`: 상태 코드에 맞는 에러 코드로 변환합니다.
-- `RequestValidationError`: Pydantic 검증 실패를 `INVALID_REQUEST`로 반환합니다.
+- `RequestValidationError`: Pydantic 검증 실패를 `VALIDATION_ERROR`로 반환합니다.
 
 ## 6. API별 흐름
 
@@ -167,29 +180,44 @@ ClassifyRequest
 
 역할:
 
-- 사용자가 예상한 시간을 그대로 쓰지 않고, 태스크 유형과 난이도에 따른 보정 계수를 곱해 현실적인 예상 시간을 계산합니다.
+- Spring 백엔드가 전달한 태스크, 보정계수, 완료 count만으로 현실적인 예상 시간을 계산합니다.
+- DB를 읽거나 쓰지 않으며, request body의 `coefficients`, `counts`를 원본으로 사용합니다.
+- `coefficients`, `counts`는 전체 map이 아니라 현재 task key에 해당하는 단일 값입니다.
 
 핵심 공식:
 
 ```text
-multiplier = (user_multiplier 또는 유형별 기본 계수) * difficulty_weight
-corrected_min = user_estimate_min * multiplier
+STAGE_0:
+predictedMinutes = round(estimatedMinutes * clamp(globalMultiplier, 0.5, 2.5))
+
+STAGE_1 이상:
+predictedMinutes = round(estimatedMinutes * exp(logCorrection))
+logCorrection = clamp(bias + 신뢰도 반영 항들의 contribution)
 ```
 
-기본 보정 계수:
+단계별 사용 항:
 
-- `TIME_BOUND`: 1.15
-- `SCOPE_BOUND`: 1.30
-- `SATISFACTION_BOUND`: 1.60
+- `STAGE_0`: `globalMultiplier`만 사용
+- `STAGE_1`: `bias`만 사용
+- `STAGE_2`: `bias` + `folder`, `difficulty`, `taskType`
+- `STAGE_3` 이상: `bias` + 1차 항 + `folderDifficulty`, `folderType`, `difficultyType`
 
-난이도 가중치:
+key 규칙:
 
-- `EASY`: 0.95
-- `MEDIUM`: 1.00
-- `HARD`: 1.20
-- `UNKNOWN`: 1.25
+- folder key: `str(folderId)`
+- difficulty key: `EASY | NORMAL | HARD | UNKNOWN`
+- taskType key: `TIME_BOUND | SCOPE_BOUND | SATISFACTION_BOUND`
+- folderDifficulty key: `{folderId}:{difficulty}`
+- folderType key: `{folderId}:{taskType}`
+- difficultyType key: `{difficulty}:{taskType}`
 
-`user_multiplier`가 없으면 Cold Start로 처리하고, 있으면 사용자 개인화 계수를 우선 사용합니다.
+주의할 점:
+
+- 요청에는 key map을 보내지 않지만, Python은 위 규칙으로 `usedTerms`의 key를 생성합니다.
+- `correctionMultiplier`는 `predictedMinutes / estimatedMinutes`가 아니라 `exp(logCorrection)`입니다.
+- `usedTerms`에는 실제 계산에 사용된 항만 들어갑니다.
+- count 조건을 만족하지 못한 항은 제외됩니다.
+- 알 수 없는 `difficulty`, `taskType`은 validation error로 처리합니다.
 
 ### `/v1/update`
 
@@ -201,23 +229,29 @@ corrected_min = user_estimate_min * multiplier
 
 역할:
 
-- 학습 세션 종료 후 실제 수행 결과를 바탕으로 사용자의 유형별 보정 계수를 갱신합니다.
-- 백엔드는 반환된 `multiplier`, `sample_count`를 DB에 저장했다가 다음 `/v1/predict` 호출 때 다시 넘기면 됩니다.
+- 완료 태스크 1건의 실제 소요시간을 바탕으로 보정계수 갱신 결과를 계산합니다.
+- FastAPI는 저장하지 않고, Spring 백엔드가 저장할 `updatedTerms`, `countIncrements`를 반환합니다.
 
 핵심 갱신 흐름:
 
 ```text
-total_estimated = actual_min / progress
-normalized = total_estimated * focus_coef
-observed_multiplier = normalized / user_estimate_min
-new_multiplier = EMA_ALPHA * observed + (1 - EMA_ALPHA) * old_multiplier
+logError = log(actualMinutes / predictedMinutes)
+clampedLogError = clamp(logError, log(0.5), log(2.0))
+
+STAGE_0:
+globalMultiplier만 업데이트
+
+STAGE_1 이상:
+w_new = w_old + alpha * share * reliability * clampedLogError
 ```
 
 주의할 점:
 
-- `progress < 0.01`이면 갱신하지 않습니다.
-- `user_estimate_min <= 0`이면 새 관측값을 만들지 않고 기존 값이나 기본값을 반환합니다.
-- 보정 계수는 `0.5`에서 `3.0` 사이로 제한됩니다.
+- `counts.totalCompleted < 5`이면 `globalMultiplier`만 업데이트합니다.
+- `counts.totalCompleted >= 5`이면 `globalMultiplier`는 변경하지 않습니다.
+- `updatedTerms`는 `{term, key, oldWeight, newWeight, delta, share, reliability}` 형태의 patch입니다.
+- `countIncrements`는 DB 저장용 증가량이며 모든 관련 key에 `1`을 반환합니다.
+- 입력 시간 값들은 모두 `> 0`이어야 합니다.
 
 ### `/v1/recommend`
 
@@ -272,20 +306,23 @@ CandidateTask 목록
 - `false`: 회의, 시험, 짧은 시간 활동처럼 연속성이 중요한 작업
 - `true`: 개념 이해, 자료 정리, 문제 풀이처럼 나눠도 되는 작업
 
-### multiplier
+### 보정계수
 
-사용자 예상 시간 대비 실제 소요 시간의 비율입니다.
+`/v1/predict`, `/v1/update`의 보정계수는 두 종류입니다.
 
-예를 들어 `multiplier=1.4`이면 사용자가 60분으로 예상한 작업을 실제로는 약 84분으로 보는 뜻입니다.
+- `globalMultiplier`: `STAGE_0`에서만 사용하는 배율 계수입니다.
+- `bias`, `folder`, `difficulty`, `taskType`, 상호작용항: `STAGE_1` 이상에서 사용하는 로그 보정 계수입니다.
+
+로그 계수는 더해서 `logCorrection`을 만들고, 최종 배율은 `exp(logCorrection)`으로 계산합니다.
 
 ## 8. 테스트가 보장하는 것
 
 ### `tests/test_api.py`
 
 - `/health` 정상 응답
-- `/v1/predict` Cold Start 응답
+- `/v1/predict` `STAGE_0` 공통 성공 응답
 - Pydantic 검증 실패 시 공통 실패 응답
-- `/v1/update` 첫 세션 갱신
+- `/v1/update` 공통 성공 응답과 `countIncrements`
 - `/v1/recommend` 추천 결과가 가용시간을 넘지 않음
 - OpenAI mock을 통한 `/v1/classify` LLM 경로 검증
 
@@ -302,7 +339,14 @@ CandidateTask 목록
 - 사용자 개인화 계수 우선 적용
 - 난이도에 따른 보정 증가
 - 보정 계수 상한 제한
-- EMA 기반 사용자 프로필 갱신
+- 기존 호환 `update_user_profile`의 EMA 기반 프로필 갱신
+- `STAGE_0` 예측에서 `globalMultiplier`만 사용
+- `STAGE_1` 예측에서 `bias`만 사용
+- `STAGE_2` 예측에서 count 조건에 따른 1차 항 포함/제외
+- `STAGE_3` 예측에서 2차 항과 `interactionLambda=0.5` 반영
+- `STAGE_0` 업데이트에서 `globalMultiplier`만 변경
+- `STAGE_1` 이상 업데이트에서 `globalMultiplier` 유지
+- 업데이트 응답의 `countIncrements` 정확성
 
 ### `tests/test_scheduler.py`
 
@@ -320,9 +364,10 @@ CandidateTask 목록
 2. 모든 API가 공통 응답 형식을 지키는가?
 3. `/v1/classify`에서 OpenAI 키가 없거나 LLM 응답이 깨질 때 기대한 실패/폴백 경로로 가는가?
 4. `NoOpPersonalization`을 계속 쓸지, 실제 개인화 레이어를 연결할지 결정되어 있는가?
-5. 사용자별 `multiplier`와 `sample_count`를 백엔드 DB에서 유형별로 저장하는 설계가 준비되어 있는가?
+5. Spring 백엔드가 사용자별 `coefficients`, `counts`를 저장하고 `/v1/predict`, `/v1/update`에 넘기는 설계가 준비되어 있는가?
 6. 추천 알고리즘에서 중요도 가중치가 서비스 정책과 맞는가?
 7. 시간 단위가 모든 계층에서 분 단위로 일관되는가?
+8. 계산 서버에 DB 접근 코드가 새로 들어오지 않았는가?
 
 ## 10. 빠른 수정 포인트
 
@@ -330,7 +375,7 @@ CandidateTask 목록
 - 응답 포맷 변경: `app/api/response.py`, `app/api/exceptions.py`를 확인합니다.
 - 분류 기준 변경: `app/services/classifier/prompts.py`를 수정합니다.
 - OpenAI 모델 변경: `app/services/classifier/constants.py`의 `DEFAULT_OPENAI_MODEL`을 확인합니다.
-- 시간 보정 정책 변경: `app/services/predictor.py`의 기본 계수, 난이도 가중치, EMA 파라미터를 수정합니다.
+- 시간 보정 정책 변경: `app/services/predictor.py`의 stage, reliability, clamp, alpha/share 상수를 수정합니다.
 - 추천 정책 변경: `app/services/scheduler.py`의 중요도 가중치, 분할 후보 생성, Knapsack 로직을 확인합니다.
 
 ## 11. 로컬 실행과 테스트

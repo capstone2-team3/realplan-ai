@@ -27,7 +27,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         location = " → ".join(str(loc) for loc in first_error.get("loc", []))
         message = f"[{location}] {first_error.get('msg', '입력값 오류')}"
         body = ApiResponse.fail(
-            code="INVALID_REQUEST",
+            code="VALIDATION_ERROR",
             message=message,
             path=request.url.path,
         )

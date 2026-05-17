@@ -2,53 +2,34 @@
 
 from __future__ import annotations
 
+import math
+
 from app.services.classifier import TaskType
+from app.schemas.predict import PredictRequest
+from app.schemas.update import UpdateRequest
+from app.services.estimator.constants import BASE_TYPE_MULTIPLIER
 from app.services.predictor import (
-    BASE_MULTIPLIER,
-    PredictInput,
     SessionRecord,
     UserTypeProfile,
-    predict_duration,
+    _select_prediction_stage,
+    calculate_prediction,
+    update_coefficients,
     update_user_profile,
 )
 
 
-class TestPredictDuration:
-    def test_cold_start_uses_base_multiplier(self):
-        out = predict_duration(PredictInput(
-            task_type=TaskType.SCOPE_BOUND,
-            user_estimate_min=60,
-            difficulty="MEDIUM",
-        ))
-        assert out.is_cold_start is True
-        # MEDIUM weight = 1.00 → 단일 계수
-        assert out.multiplier_used == BASE_MULTIPLIER[TaskType.SCOPE_BOUND]
-        assert out.corrected_min == round(60 * BASE_MULTIPLIER[TaskType.SCOPE_BOUND])
+class TestSelectStage:
+    def test_select_stage_boundaries(self):
+        cases = (
+            (0, "EARLY"),
+            (49, "EARLY"),
+            (50, "MAIN_EFFECT"),
+            (199, "MAIN_EFFECT"),
+            (200, "INTERACTION"),
+        )
 
-    def test_personalized_overrides_base(self):
-        out = predict_duration(PredictInput(
-            task_type=TaskType.SATISFACTION_BOUND,
-            user_estimate_min=100,
-            difficulty="MEDIUM",
-            user_multiplier=2.0,
-        ))
-        assert out.is_cold_start is False
-        assert out.multiplier_used == 2.0
-        assert out.corrected_min == 200
-
-    def test_difficulty_amplifies_multiplier(self):
-        easy = predict_duration(PredictInput(TaskType.TIME_BOUND, 60, "EASY"))
-        hard = predict_duration(PredictInput(TaskType.TIME_BOUND, 60, "HARD"))
-        assert hard.corrected_min > easy.corrected_min
-
-    def test_clip_max(self):
-        out = predict_duration(PredictInput(
-            task_type=TaskType.TIME_BOUND,
-            user_estimate_min=60,
-            difficulty="HARD",
-            user_multiplier=10.0,  # 명백히 상한 초과
-        ))
-        assert out.multiplier_used <= 3.0
+        for total_completed, expected_stage in cases:
+            assert _select_prediction_stage(total_completed) == expected_stage
 
 
 class TestUpdateUserProfile:
@@ -74,7 +55,7 @@ class TestUpdateUserProfile:
         )
         out = update_user_profile(None, record, TaskType.SATISFACTION_BOUND)
         # 기본값에서 출발했으므로 BASE와 관측값(약 2.78→clip 후 2.78) 사이
-        base = BASE_MULTIPLIER[TaskType.SATISFACTION_BOUND]
+        base = BASE_TYPE_MULTIPLIER[TaskType.SATISFACTION_BOUND]
         assert out.sample_count == 1
         assert base < out.multiplier <= 3.0
 
@@ -91,3 +72,174 @@ class TestUpdateUserProfile:
         out = update_user_profile(profile, record, TaskType.SCOPE_BOUND)
         assert out.multiplier > 1.0
         assert out.sample_count == 6
+
+
+def _predict_payload(total_completed: int) -> dict:
+    return {
+        "task": {
+            "taskId": 101,
+            "estimatedMinutes": 60,
+            "folderId": 10,
+            "difficulty": "HARD",
+            "taskType": "SCOPE_BOUND",
+        },
+        "coefficients": {
+            "bias": 0.08,
+            "globalMultiplier": 1.1,
+            "folder": 0.12,
+            "difficulty": 0.1,
+            "taskType": 0.07,
+            "folderDifficulty": 0.08,
+            "folderType": 0.04,
+            "difficultyType": 0.06,
+        },
+        "counts": {
+            "totalCompleted": total_completed,
+            "folder": 16,
+            "difficulty": 18,
+            "taskType": 21,
+            "folderDifficulty": 9,
+            "folderType": 12,
+            "difficultyType": 10,
+            "completedSinceLastTrain": 0,
+        },
+    }
+
+
+def _predict_result(payload: dict) -> dict:
+    return calculate_prediction(PredictRequest.model_validate(payload))
+
+
+def _update_result(payload: dict) -> dict:
+    return update_coefficients(UpdateRequest.model_validate(payload))
+
+
+def _update_payload(total_completed: int) -> dict:
+    payload = _predict_payload(total_completed)
+    payload["completedTask"] = {
+        "taskId": 101,
+        "estimatedMinutes": 60,
+        "predictedMinutes": 82,
+        "actualMinutes": 95,
+        "folderId": 10,
+        "difficulty": "HARD",
+        "taskType": "SCOPE_BOUND",
+    }
+    del payload["task"]
+    return payload
+
+
+class TestPredictCoefficientLogic:
+    def test_early_uses_global_type_and_difficulty_prior(self):
+        payload = _predict_payload(total_completed=10)
+        payload["task"]["estimatedMinutes"] = 100
+        payload["task"]["taskType"] = "SATISFACTION_BOUND"
+        payload["coefficients"]["logAlphaGlobal"] = math.log(1.1)
+        payload["coefficients"]["logAlphaType"] = math.log(1.2)
+        payload["counts"]["taskType"] = 5
+        out = _predict_result(payload)
+        r_type = 5 / 15
+        expected_log = math.log(1.1) + (r_type * math.log(1.2)) + math.log(1.2)
+        assert out["stage"] == "EARLY"
+        assert out["logCorrection"] == expected_log
+        assert out["predictedMinutes"] == round(100 * math.exp(expected_log))
+        assert [term["term"] for term in out["usedTerms"]] == [
+            "logAlphaGlobal",
+            "logAlphaType",
+            "difficultyPrior",
+        ]
+
+    def test_main_effect_sums_terms_with_folder_shrinkage(self):
+        payload = _predict_payload(total_completed=80)
+        payload["coefficients"].update(
+            {
+                "betaIntercept": 0.1,
+                "betaType": 0.2,
+                "betaDifficulty": 0.3,
+                "betaFolder": 0.4,
+            }
+        )
+        payload["counts"]["taskType"] = 100
+        payload["counts"]["difficulty"] = 100
+        payload["counts"]["folder"] = 1
+        out = _predict_result(payload)
+        folder_term = next(term for term in out["usedTerms"] if term["term"] == "betaFolder")
+        expected_folder = (1 / 11) * 0.4
+
+        assert out["stage"] == "MAIN_EFFECT"
+        assert folder_term["reliability"] == 1 / 11
+        assert folder_term["contribution"] == expected_folder
+        assert out["logCorrection"] > expected_folder
+
+    def test_interaction_uses_only_ready_interactions(self):
+        payload = _predict_payload(total_completed=250)
+        payload["coefficients"].update(
+            {
+                "betaIntercept": 0.0,
+                "betaType": 0.1,
+                "betaDifficulty": 0.1,
+                "betaFolder": 0.1,
+                "betaTypeDifficulty": 0.2,
+                "betaTypeFolder": 0.3,
+                "betaFolderDifficulty": 0.4,
+            }
+        )
+        payload["counts"]["taskTypeDifficulty"] = 20
+        payload["counts"]["taskTypeFolder"] = 19
+        payload["counts"]["folderDifficulty"] = 21
+        out = _predict_result(payload)
+        terms = [term["term"] for term in out["usedTerms"]]
+
+        assert out["stage"] == "INTERACTION"
+        assert "betaTypeDifficulty" in terms
+        assert "betaFolderDifficulty" in terms
+        assert "betaTypeFolder" not in terms
+
+
+class TestUpdateCoefficientLogic:
+    def test_update_uses_actual_over_estimated_target_and_history(self):
+        out = _update_result(_update_payload(total_completed=80))
+        expected_ratio = 95 / 60
+
+        assert out["error"]["actualOverEstimatedRatio"] == expected_ratio
+        assert out["error"]["logRatio"] == math.log(expected_ratio)
+        assert out["historyRecord"]["log_ratio"] == math.log(expected_ratio)
+        assert out["historyRecord"]["predicted_minutes"] == 82
+
+    def test_early_updates_ema_log_terms(self):
+        payload = _update_payload(total_completed=10)
+        payload["coefficients"]["logAlphaGlobal"] = math.log(1.1)
+        payload["coefficients"]["logAlphaType"] = math.log(1.2)
+        out = _update_result(payload)
+
+        assert [term["term"] for term in out["updatedTerms"]] == [
+            "LOG_ALPHA_GLOBAL",
+            "LOG_ALPHA_TYPE",
+        ]
+        assert all(term["updateMethod"] == "EMA_LOG_RATIO" for term in out["updatedTerms"])
+
+    def test_main_effect_retrain_required_every_10_records(self):
+        payload = _update_payload(total_completed=80)
+        payload["counts"]["completedSinceLastTrain"] = 9
+        out = _update_result(payload)
+        assert out["updatedTerms"] == []
+        assert out["retrainRequired"] is True
+
+    def test_interaction_retrain_required_every_50_records(self):
+        payload = _update_payload(total_completed=250)
+        payload["counts"]["completedSinceLastTrain"] = 49
+        out = _update_result(payload)
+        assert out["updatedTerms"] == []
+        assert out["retrainRequired"] is True
+
+    def test_update_returns_exact_count_increments(self):
+        out = _update_result(_update_payload(total_completed=42))
+        assert out["countIncrements"] == {
+            "totalCompleted": 1,
+            "folder": {"folder:10": 1},
+            "difficulty": {"difficulty:HARD": 1},
+            "taskType": {"taskType:SCOPE_BOUND": 1},
+            "folderDifficulty": {"folderDifficulty:10:HARD": 1},
+            "taskTypeFolder": {"taskTypeFolder:SCOPE_BOUND:10": 1},
+            "taskTypeDifficulty": {"taskTypeDifficulty:SCOPE_BOUND:HARD": 1},
+        }

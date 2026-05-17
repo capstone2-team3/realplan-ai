@@ -17,6 +17,52 @@ def _fail(body: dict) -> dict:
     return body["error"]
 
 
+def _predict_payload(total_completed: int = 42) -> dict:
+    return {
+        "task": {
+            "taskId": 101,
+            "estimatedMinutes": 60,
+            "folderId": 10,
+            "difficulty": "HARD",
+            "taskType": "SCOPE_BOUND",
+        },
+        "coefficients": {
+            "bias": 0.08,
+            "globalMultiplier": 1.1,
+            "folder": 0.12,
+            "difficulty": 0.1,
+            "taskType": 0.07,
+            "folderDifficulty": 0.08,
+            "folderType": 0.04,
+            "difficultyType": 0.06,
+        },
+        "counts": {
+            "totalCompleted": total_completed,
+            "folder": 16,
+            "difficulty": 18,
+            "taskType": 21,
+            "folderDifficulty": 9,
+            "folderType": 12,
+            "difficultyType": 10,
+        },
+    }
+
+
+def _update_payload(total_completed: int = 42) -> dict:
+    payload = _predict_payload(total_completed)
+    payload["completedTask"] = {
+        "taskId": 101,
+        "estimatedMinutes": 60,
+        "predictedMinutes": 82,
+        "actualMinutes": 95,
+        "folderId": 10,
+        "difficulty": "HARD",
+        "taskType": "SCOPE_BOUND",
+    }
+    del payload["task"]
+    return payload
+
+
 def test_health(client):
     res = client.get("/health")
     assert res.status_code == 200
@@ -24,41 +70,36 @@ def test_health(client):
     assert data["status"] == "ok"
 
 
-def test_predict_cold_start(client):
-    res = client.post("/v1/predict", json={
-        "task_type": "SCOPE_BOUND",
-        "user_estimate_min": 60,
-        "difficulty": "MEDIUM",
-    })
+def test_predict_early_uses_common_success_format(client):
+    payload = _predict_payload(total_completed=0)
+    payload["coefficients"]["globalMultiplier"] = 1.2
+    res = client.post("/v1/predict", json=payload)
     assert res.status_code == 200
     data = _ok(res.json())
-    assert data["is_cold_start"] is True
-    assert data["corrected_min"] > 60
+    assert data["stage"] == "EARLY"
+    assert [term["term"] for term in data["usedTerms"]] == [
+        "logAlphaGlobal",
+        "logAlphaType",
+        "difficultyPrior",
+    ]
 
 
 def test_predict_invalid_returns_common_fail_format(client):
-    res = client.post("/v1/predict", json={
-        "task_type": "SCOPE_BOUND",
-        "user_estimate_min": 0,  # gt=0 위반
-        "difficulty": "MEDIUM",
-    })
-    assert res.status_code == 422
+    payload = _predict_payload()
+    payload["task"]["estimatedMinutes"] = 0
+    res = client.post("/v1/predict", json=payload)
+    assert res.status_code == 400
     err = _fail(res.json())
-    assert err["code"] == "INVALID_REQUEST"
+    assert err["code"] == "INVALID_ESTIMATED_MINUTES"
 
 
-def test_update_first_session(client):
-    res = client.post("/v1/update", json={
-        "task_type": "SATISFACTION_BOUND",
-        "user_estimate_min": 90,
-        "actual_min": 150,
-        "progress": 0.6,
-        "focus_level": 1,
-    })
+def test_update_returns_common_success_format(client):
+    res = client.post("/v1/update", json=_update_payload())
     assert res.status_code == 200
     data = _ok(res.json())
-    assert data["sample_count"] == 1
-    assert data["multiplier"] > 0
+    assert data["taskId"] == 101
+    assert data["countIncrements"]["folder"] == {"folder:10": 1}
+    assert data["historyRecord"]["log_ratio"] == data["error"]["logRatio"]
 
 
 def test_recommend(client):

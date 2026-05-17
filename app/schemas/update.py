@@ -1,27 +1,91 @@
-"""/update 엔드포인트 DTO."""
+"""/v1/update 엔드포인트 DTO."""
 
 from __future__ import annotations
 
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field
 
-from pydantic import BaseModel, Field
+from app.schemas.predict import CoefficientsPayload, CountsPayload
 
-from app.services.classifier import TaskType
+
+class CompletedTaskPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_id: int = Field(..., alias="taskId")
+    estimated_minutes: int = Field(..., alias="estimatedMinutes")
+    predicted_minutes: int = Field(..., alias="predictedMinutes")
+    actual_minutes: int = Field(..., alias="actualMinutes")
+    folder_id: int = Field(..., alias="folderId")
+    difficulty: str
+    task_type: str = Field(..., alias="taskType")
 
 
 class UpdateRequest(BaseModel):
-    task_type: TaskType
-    user_estimate_min: int
-    actual_min: int = Field(..., gt=0)
-    progress: float = Field(..., ge=0.0, le=1.0)
-    focus_level: int = Field(2, ge=0, le=3, description="0=산만, 1=보통, 2=집중, 3=몰입")
-    current_multiplier: Optional[float] = Field(
-        default=None,
-        description="갱신 전 현재 보정 계수. 없으면 베이스값에서 시작.",
-    )
-    current_sample_count: int = 0
+    model_config = ConfigDict(populate_by_name=True)
+
+    completed_task: CompletedTaskPayload = Field(..., alias="completedTask")
+    coefficients: CoefficientsPayload = Field(default_factory=CoefficientsPayload)
+    counts: CountsPayload = Field(default_factory=CountsPayload)
+
+
+class UpdateErrorDetail(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    estimated_minutes: int = Field(..., alias="estimatedMinutes")
+    predicted_minutes: int = Field(..., alias="predictedMinutes")
+    actual_minutes: int = Field(..., alias="actualMinutes")
+    actual_over_estimated_ratio: float = Field(..., alias="actualOverEstimatedRatio")
+    log_ratio: float = Field(..., alias="logRatio")
+    clamped_log_ratio: float = Field(..., alias="clampedLogRatio")
+
+
+class UpdatedTerm(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    term: str
+    key: str
+    old_weight: float = Field(..., alias="oldWeight")
+    new_weight: float = Field(..., alias="newWeight")
+    delta: float
+    update_method: str | None = Field(default=None, alias="updateMethod")
+    share: float | None = None
+    reliability: float | None = None
+
+
+class CountIncrements(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_completed: int = Field(..., alias="totalCompleted")
+    folder: dict[str, int]
+    difficulty: dict[str, int]
+    task_type: dict[str, int] = Field(..., alias="taskType")
+    folder_difficulty: dict[str, int] = Field(..., alias="folderDifficulty")
+    task_type_difficulty: dict[str, int] = Field(default_factory=dict, alias="taskTypeDifficulty")
+    task_type_folder: dict[str, int] = Field(default_factory=dict, alias="taskTypeFolder")
+    folder_type: dict[str, int] = Field(default_factory=dict, alias="folderType")
+    difficulty_type: dict[str, int] = Field(default_factory=dict, alias="difficultyType")
+
+
+class HistoryRecord(BaseModel):
+    task_id: int
+    estimated_minutes: int
+    predicted_minutes: int
+    actual_minutes: int
+    log_ratio: float
+    task_type: str
+    difficulty: str
+    folder_id: int
 
 
 class UpdateResponse(BaseModel):
-    multiplier: float
-    sample_count: int
+    model_config = ConfigDict(populate_by_name=True)
+
+    task_id: int = Field(..., alias="taskId")
+    model_version: str = Field(..., alias="modelVersion")
+    stage: str
+    error: UpdateErrorDetail
+    observation: UpdateErrorDetail | None = None
+    history_record: HistoryRecord | None = Field(default=None, alias="historyRecord")
+    history_append: HistoryRecord | None = Field(default=None, alias="historyAppend")
+    updated_terms: list[UpdatedTerm] = Field(..., alias="updatedTerms")
+    count_increments: CountIncrements = Field(..., alias="countIncrements")
+    retrain_required: bool = Field(False, alias="retrainRequired")

@@ -3,34 +3,28 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from app.api.response import ApiResponse
 from app.schemas.predict import PredictRequest, PredictResponse
-from app.services.predictor import PredictInput, predict_duration
+from app.services.predictor import CalculationError, calculate_prediction
 
 router = APIRouter()
 
 
 @router.post("/predict", response_model=ApiResponse[PredictResponse])
 def predict(req: PredictRequest, request: Request):
-    """
-    user_multiplier가 None이면 Cold Start (논문 기반 기본값).
-    있으면 개인화된 계수 적용.
-    """
-    inp = PredictInput(
-        task_type=req.task_type,
-        user_estimate_min=req.user_estimate_min,
-        difficulty=req.difficulty,
-        user_multiplier=req.user_multiplier,
-    )
-    result = predict_duration(inp)
+    """Spring에서 전달한 계수와 count 기반으로 보정 소요시간을 계산한다."""
+    try:
+        result = calculate_prediction(req)
+    except CalculationError as exc:
+        body = ApiResponse.fail(exc.code, exc.message, request.url.path)
+        return JSONResponse(status_code=400, content=body.model_dump())
+    except Exception:
+        body = ApiResponse.fail("PREDICTION_FAILED", "예측 계산 중 오류가 발생했습니다.", request.url.path)
+        return JSONResponse(status_code=500, content=body.model_dump())
 
     return ApiResponse.ok(
-        data=PredictResponse(
-            corrected_min=result.corrected_min,
-            multiplier_used=result.multiplier_used,
-            is_cold_start=result.is_cold_start,
-            breakdown=result.breakdown,
-        ),
+        data=PredictResponse.model_validate(result),
         path=request.url.path,
     )

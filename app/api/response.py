@@ -26,7 +26,7 @@ def status_to_code(status: int) -> str:
         401: "UNAUTHORIZED",
         403: "FORBIDDEN",
         404: "NOT_FOUND",
-        422: "INVALID_REQUEST",
+        422: "VALIDATION_ERROR",
         500: "INTERNAL_ERROR",
         502: "BAD_GATEWAY",
     }.get(status, f"HTTP_{status}")
