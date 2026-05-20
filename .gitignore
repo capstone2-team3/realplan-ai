@@ -16,3 +16,5 @@ wheels/
 .venv/
 
 CLAUDE.md
+
+.DS_Store
