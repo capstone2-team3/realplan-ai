@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 
 from app.schemas.predict import PredictRequest, PredictResponse
@@ -14,11 +15,15 @@ from app.services.planning_model.base import CalculationError, PlanningStage
 from app.services.planning_model.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
+    DROP_RATIO_MAX,
+    DROP_RATIO_MIN,
     ETA_GLOBAL,
     ETA_TYPE,
     STAGE_EARLY,
     TYPE_SHRINKAGE_N,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EarlyStage(PlanningStage):
@@ -78,7 +83,25 @@ class EarlyStage(PlanningStage):
                 "actualMinutes는 0보다 커야 합니다.",
             )
 
-        log_ratio = math.log(req.actualMinutes / req.estimatedMinutes)
+        # Drop 판정: [DROP_RATIO_MIN, DROP_RATIO_MAX] 바깥은 학습 제외.
+        # 경계값은 포함(<=, >=)이라 정확히 0.1, 8.0은 Drop 되지 않는다.
+        ratio = req.actualMinutes / req.estimatedMinutes
+        if ratio > DROP_RATIO_MAX:
+            return self._drop_response(
+                req,
+                log_ratio=math.log(ratio),
+                clamped_log_ratio=CLAMP_MAX,
+                reason=f"ratio {ratio:.2f} exceeds DROP_RATIO_MAX ({DROP_RATIO_MAX})",
+            )
+        if ratio < DROP_RATIO_MIN:
+            return self._drop_response(
+                req,
+                log_ratio=math.log(ratio),
+                clamped_log_ratio=CLAMP_MIN,
+                reason=f"ratio {ratio:.2f} is below DROP_RATIO_MIN ({DROP_RATIO_MIN})",
+            )
+
+        log_ratio = math.log(ratio)
         clamped_log_ratio = max(CLAMP_MIN, min(CLAMP_MAX, log_ratio))
 
         # userGlobal EMA 업데이트
@@ -113,4 +136,29 @@ class EarlyStage(PlanningStage):
             logRatio=log_ratio,
             clampedLogRatio=clamped_log_ratio,
             stage=STAGE_EARLY,
+            dropped=False,
+            dropReason=None,
+        )
+
+    def _drop_response(
+        self,
+        req: UpdateRequest,
+        *,
+        log_ratio: float,
+        clamped_log_ratio: float,
+        reason: str,
+    ) -> UpdateResponse:
+        """Drop 시 응답 생성. 계수와 typeCount는 입력 그대로 반환한다."""
+        logger.warning("[Drop] reason=%s taskType=%s", reason, req.taskType)
+        return UpdateResponse(
+            userGlobal=(
+                req.userGlobal if req.userGlobal is not None else req.systemGlobalPrior
+            ),
+            userTypeResidual=dict(req.userTypeResidual or {}),
+            typeCount=dict(req.typeCount or {}),
+            logRatio=log_ratio,
+            clampedLogRatio=clamped_log_ratio,
+            stage=STAGE_EARLY,
+            dropped=True,
+            dropReason=reason,
         )

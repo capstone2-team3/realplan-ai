@@ -34,3 +34,5 @@ class UpdateResponse(BaseModel):
     logRatio: float
     clampedLogRatio: float
     stage: str
+    dropped: bool = False
+    dropReason: Optional[str] = None

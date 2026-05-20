@@ -11,6 +11,8 @@ from app.schemas.update import UpdateRequest
 from app.services.planning_model.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
+    DROP_RATIO_MAX,
+    DROP_RATIO_MIN,
     ETA_GLOBAL,
     ETA_TYPE,
     STAGE_EARLY,
@@ -189,6 +191,116 @@ def test_update_invalid_minutes_raise():
         stage.update(_make_update_request(estimatedMinutes=0))
     with pytest.raises(Exception):
         stage.update(_make_update_request(actualMinutes=0))
+
+
+# ---------- drop -------------------------------------------------------
+
+
+def test_update_upper_boundary_is_not_dropped():
+    """ratio == DROP_RATIO_MAX (8.0)는 경계값이므로 Drop되지 않고 학습된다."""
+    stage = EarlyStage()
+    req = _make_update_request(
+        estimatedMinutes=100.0,
+        actualMinutes=800.0,
+        userGlobal=0.0,
+        typeCount={"SATISFACTION": 0},
+    )
+    result = stage.update(req)
+
+    assert result.dropped is False
+    assert result.dropReason is None
+    # clamp는 적용된다 (log(8.0) > log(4.0))
+    assert math.isclose(result.clampedLogRatio, CLAMP_MAX, rel_tol=1e-9)
+    # 정상 학습 → typeCount 증가
+    assert result.typeCount["SATISFACTION"] == 1
+
+
+def test_update_above_upper_drop_threshold_is_dropped():
+    """ratio > DROP_RATIO_MAX (예: 8.01) → Drop, 계수 변경 없음."""
+    stage = EarlyStage()
+    req = _make_update_request(
+        estimatedMinutes=100.0,
+        actualMinutes=801.0,
+        userGlobal=0.42,
+        userTypeResidual={"SATISFACTION": 0.15},
+        typeCount={"SATISFACTION": 7},
+    )
+    result = stage.update(req)
+
+    assert result.dropped is True
+    assert result.dropReason is not None
+    assert "exceeds DROP_RATIO_MAX" in result.dropReason
+    # 계수 불변
+    assert result.userGlobal == 0.42
+    assert result.userTypeResidual == {"SATISFACTION": 0.15}
+    # typeCount 증가하지 않음
+    assert result.typeCount == {"SATISFACTION": 7}
+    # logRatio는 그대로 보고, clampedLogRatio는 참고용 상한값
+    assert math.isclose(result.logRatio, math.log(8.01), rel_tol=1e-9)
+    assert math.isclose(result.clampedLogRatio, CLAMP_MAX, rel_tol=1e-9)
+
+
+def test_update_lower_boundary_is_not_dropped():
+    """ratio == DROP_RATIO_MIN (0.1)는 경계값이므로 Drop되지 않는다."""
+    stage = EarlyStage()
+    req = _make_update_request(
+        estimatedMinutes=100.0,
+        actualMinutes=10.0,
+        userGlobal=0.0,
+        typeCount={"SATISFACTION": 3},
+    )
+    result = stage.update(req)
+
+    assert result.dropped is False
+    assert result.dropReason is None
+    assert math.isclose(result.clampedLogRatio, CLAMP_MIN, rel_tol=1e-9)
+    assert result.typeCount["SATISFACTION"] == 4
+
+
+def test_update_below_lower_drop_threshold_is_dropped():
+    """ratio < DROP_RATIO_MIN (예: 0.09) → Drop, 계수 변경 없음."""
+    stage = EarlyStage()
+    req = _make_update_request(
+        estimatedMinutes=100.0,
+        actualMinutes=9.0,
+        userGlobal=-0.1,
+        userTypeResidual={"SATISFACTION": -0.05},
+        typeCount={"SATISFACTION": 2},
+    )
+    result = stage.update(req)
+
+    assert result.dropped is True
+    assert result.dropReason is not None
+    assert "below DROP_RATIO_MIN" in result.dropReason
+    assert result.userGlobal == -0.1
+    assert result.userTypeResidual == {"SATISFACTION": -0.05}
+    assert result.typeCount == {"SATISFACTION": 2}
+    assert math.isclose(result.logRatio, math.log(0.09), rel_tol=1e-9)
+    assert math.isclose(result.clampedLogRatio, CLAMP_MIN, rel_tol=1e-9)
+
+
+def test_drop_new_user_uses_system_prior_for_user_global():
+    """Drop 시 userGlobal=None이면 systemGlobalPrior로 fallback해서 반환한다."""
+    stage = EarlyStage()
+    req = _make_update_request(
+        estimatedMinutes=100.0,
+        actualMinutes=900.0,  # ratio=9.0 → Drop
+        userGlobal=None,
+        userTypeResidual=None,
+        typeCount=None,
+    )
+    result = stage.update(req)
+
+    assert result.dropped is True
+    assert result.userGlobal == SYSTEM_GLOBAL
+    assert result.userTypeResidual == {}
+    assert result.typeCount == {}
+
+
+def test_drop_constants_are_aligned_with_clamp():
+    """Drop 범위는 Clamp 범위를 포함한다 (sanity check)."""
+    assert DROP_RATIO_MIN < math.exp(CLAMP_MIN)
+    assert DROP_RATIO_MAX > math.exp(CLAMP_MAX)
 
 
 # ---------- router & soft blending -------------------------------------

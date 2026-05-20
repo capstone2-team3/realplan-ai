@@ -17,4 +17,5 @@ class InteractionStage(PlanningStage):
         raise NotImplementedError("INTERACTION stage not yet implemented")
 
     def update(self, req: UpdateRequest) -> UpdateResponse:
+        # TODO: Drop 판정을 early_stage.py와 동일한 방식으로 맨 앞에 추가할 것
         raise NotImplementedError("INTERACTION stage not yet implemented")

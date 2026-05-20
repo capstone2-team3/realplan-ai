@@ -16,6 +16,10 @@ SYSTEM_SHRINKAGE_N = 50        # 시스템 effect shrinkage
 CLAMP_MIN = math.log(1 / 3)
 CLAMP_MAX = math.log(4.0)
 
+# Drop 경계 — 이 범위를 벗어나면 계수 update 시 학습에서 제외
+DROP_RATIO_MAX = 8.0
+DROP_RATIO_MIN = 0.1
+
 # MAIN 단계에서 folderId를 회귀 피처로 포함시키기 위한 최소 태스크 수
 FOLDER_MIN_TASKS = 5
 
