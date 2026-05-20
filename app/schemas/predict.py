@@ -6,7 +6,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
 class PredictRequest(BaseModel):
     estimatedMinutes: float = Field(..., description="사용자가 입력한 추정 소요시간(분)")
     completedCount: int = Field(..., description="해당 사용자의 완료 태스크 누적 개수")

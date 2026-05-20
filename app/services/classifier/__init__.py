@@ -1,6 +1,6 @@
 """Task 분류기 패키지."""
 
-from app.services.classifier.core import classify_task
+from app.services.classifier.classification import classify_task
 from app.services.classifier.personalization import (
     KeywordPersonalization,
     NoOpPersonalization,

@@ -12,6 +12,7 @@ class UpdateRequest(BaseModel):
     actualMinutes: float = Field(..., description="실제 소요된 시간(분)")
     completedCount: int = Field(..., description="이번 업데이트 직전까지의 완료 태스크 누적 개수")
     taskType: str
+
     difficulty: str
     folderId: Optional[str] = None
 
