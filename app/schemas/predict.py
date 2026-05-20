@@ -1,90 +1,31 @@
-"""/v1/predict 엔드포인트 DTO."""
+"""/predict 엔드포인트 DTO. Java Spring DTO와 1:1 매핑."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Optional
 
-
-class TaskPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    task_id: int = Field(..., alias="taskId")
-    estimated_minutes: int = Field(..., alias="estimatedMinutes")
-    folder_id: int = Field(..., alias="folderId")
-    difficulty: str
-    task_type: str = Field(..., alias="taskType")
-
-
-class CoefficientsPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    bias: float = 0.0
-    global_multiplier: float = Field(1.0, alias="globalMultiplier")
-    folder: float | None = None
-    difficulty: float | None = None
-    task_type: float | None = Field(default=None, alias="taskType")
-    folder_difficulty: float | None = Field(default=None, alias="folderDifficulty")
-    folder_type: float | None = Field(default=None, alias="folderType")
-    difficulty_type: float | None = Field(default=None, alias="difficultyType")
-    log_alpha_global: float | dict[str, float] | None = Field(default=None, alias="logAlphaGlobal")
-    log_alpha_type: float | dict[str, float] | None = Field(default=None, alias="logAlphaType")
-    beta_intercept: float | dict[str, float] | None = Field(default=None, alias="betaIntercept")
-    beta_type: float | dict[str, float] | None = Field(default=None, alias="betaType")
-    beta_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaDifficulty")
-    beta_folder: float | dict[str, float] | None = Field(default=None, alias="betaFolder")
-    beta_type_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaTypeDifficulty")
-    beta_type_folder: float | dict[str, float] | None = Field(default=None, alias="betaTypeFolder")
-    beta_folder_difficulty: float | dict[str, float] | None = Field(default=None, alias="betaFolderDifficulty")
-    references: dict[str, str | None] | None = None
-
-
-class CountsPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    total_completed: int = Field(0, alias="totalCompleted")
-    folder: int = 0
-    difficulty: int = 0
-    task_type: int = Field(0, alias="taskType")
-    folder_difficulty: int = Field(0, alias="folderDifficulty")
-    folder_type: int = Field(0, alias="folderType")
-    difficulty_type: int = Field(0, alias="difficultyType")
-    task_type_difficulty: int = Field(0, alias="taskTypeDifficulty")
-    task_type_folder: int = Field(0, alias="taskTypeFolder")
-    completed_since_last_train: int = Field(0, alias="completedSinceLastTrain")
+from pydantic import BaseModel, Field
 
 
 class PredictRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    estimatedMinutes: float = Field(..., description="사용자가 입력한 추정 소요시간(분)")
+    completedCount: int = Field(..., description="해당 사용자의 완료 태스크 누적 개수")
+    taskType: str = Field(..., description="태스크 유형 (예: TIME_BOUND / SCOPE_BOUND / SATISFACTION_BOUND)")
+    difficulty: str = Field(..., description="난이도 (예: EASY / NORMAL / HARD)")
+    folderId: Optional[str] = Field(default=None, description="폴더 ID. MAIN 단계부터 사용")
 
-    task: TaskPayload
-    coefficients: CoefficientsPayload = Field(default_factory=CoefficientsPayload)
-    counts: CountsPayload = Field(default_factory=CountsPayload)
+    # 사용자 개인 계수 (Spring에서 주입, 없으면 신규 사용자)
+    userGlobal: Optional[float] = None
+    userTypeResidual: Optional[dict[str, float]] = None
+    typeCount: Optional[dict[str, int]] = None
 
-
-class UsedTerm(BaseModel):
-    term: str
-    key: str
-    weight: float
-    reliability: float
-    contribution: float
-
-
-class PredictPolicy(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    min_log_correction: float | None = Field(..., alias="minLogCorrection")
-    max_log_correction: float | None = Field(..., alias="maxLogCorrection")
-    model_version: str = Field(..., alias="modelVersion")
+    # 시스템 prior (Spring에서 주입)
+    systemGlobalPrior: float
+    systemTypeEffect: dict[str, float]
+    systemDifficultyEffect: dict[str, float]
 
 
 class PredictResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    task_id: int = Field(..., alias="taskId")
-    estimated_minutes: int = Field(..., alias="estimatedMinutes")
-    predicted_minutes: int = Field(..., alias="predictedMinutes")
-    correction_multiplier: float = Field(..., alias="correctionMultiplier")
-    log_correction: float = Field(..., alias="logCorrection")
+    predictedMinutes: float
+    logCorrection: float
     stage: str
-    used_terms: list[UsedTerm] = Field(..., alias="usedTerms")
-    policy: PredictPolicy

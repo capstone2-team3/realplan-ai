@@ -1,91 +1,35 @@
-"""/v1/update 엔드포인트 DTO."""
+"""/update 엔드포인트 DTO. Java Spring DTO와 1:1 매핑."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Optional
 
-from app.schemas.predict import CoefficientsPayload, CountsPayload
-
-
-class CompletedTaskPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    task_id: int = Field(..., alias="taskId")
-    estimated_minutes: int = Field(..., alias="estimatedMinutes")
-    predicted_minutes: int = Field(..., alias="predictedMinutes")
-    actual_minutes: int = Field(..., alias="actualMinutes")
-    folder_id: int = Field(..., alias="folderId")
-    difficulty: str
-    task_type: str = Field(..., alias="taskType")
+from pydantic import BaseModel, Field
 
 
 class UpdateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    completed_task: CompletedTaskPayload = Field(..., alias="completedTask")
-    coefficients: CoefficientsPayload = Field(default_factory=CoefficientsPayload)
-    counts: CountsPayload = Field(default_factory=CountsPayload)
-
-
-class UpdateErrorDetail(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    estimated_minutes: int = Field(..., alias="estimatedMinutes")
-    predicted_minutes: int = Field(..., alias="predictedMinutes")
-    actual_minutes: int = Field(..., alias="actualMinutes")
-    actual_over_estimated_ratio: float = Field(..., alias="actualOverEstimatedRatio")
-    log_ratio: float = Field(..., alias="logRatio")
-    clamped_log_ratio: float = Field(..., alias="clampedLogRatio")
-
-
-class UpdatedTerm(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    term: str
-    key: str
-    old_weight: float = Field(..., alias="oldWeight")
-    new_weight: float = Field(..., alias="newWeight")
-    delta: float
-    update_method: str | None = Field(default=None, alias="updateMethod")
-    share: float | None = None
-    reliability: float | None = None
-
-
-class CountIncrements(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    total_completed: int = Field(..., alias="totalCompleted")
-    folder: dict[str, int]
-    difficulty: dict[str, int]
-    task_type: dict[str, int] = Field(..., alias="taskType")
-    folder_difficulty: dict[str, int] = Field(..., alias="folderDifficulty")
-    task_type_difficulty: dict[str, int] = Field(default_factory=dict, alias="taskTypeDifficulty")
-    task_type_folder: dict[str, int] = Field(default_factory=dict, alias="taskTypeFolder")
-    folder_type: dict[str, int] = Field(default_factory=dict, alias="folderType")
-    difficulty_type: dict[str, int] = Field(default_factory=dict, alias="difficultyType")
-
-
-class HistoryRecord(BaseModel):
-    task_id: int
-    estimated_minutes: int
-    predicted_minutes: int
-    actual_minutes: int
-    log_ratio: float
-    task_type: str
+    estimatedMinutes: float = Field(..., description="사용자가 입력했던 추정 소요시간(분)")
+    actualMinutes: float = Field(..., description="실제 소요된 시간(분)")
+    completedCount: int = Field(..., description="이번 업데이트 직전까지의 완료 태스크 누적 개수")
+    taskType: str
     difficulty: str
-    folder_id: int
+    folderId: Optional[str] = None
+
+    # 업데이트 전 현재 계수 (없으면 신규 사용자)
+    userGlobal: Optional[float] = None
+    userTypeResidual: Optional[dict[str, float]] = None
+    typeCount: Optional[dict[str, int]] = None
+
+    # 시스템 prior
+    systemGlobalPrior: float
+    systemTypeEffect: dict[str, float]
+    systemDifficultyEffect: dict[str, float]
 
 
 class UpdateResponse(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    task_id: int = Field(..., alias="taskId")
-    model_version: str = Field(..., alias="modelVersion")
+    userGlobal: float
+    userTypeResidual: dict[str, float]
+    typeCount: dict[str, int]
+    logRatio: float
+    clampedLogRatio: float
     stage: str
-    error: UpdateErrorDetail
-    observation: UpdateErrorDetail | None = None
-    history_record: HistoryRecord | None = Field(default=None, alias="historyRecord")
-    history_append: HistoryRecord | None = Field(default=None, alias="historyAppend")
-    updated_terms: list[UpdatedTerm] = Field(..., alias="updatedTerms")
-    count_increments: CountIncrements = Field(..., alias="countIncrements")
-    retrain_required: bool = Field(False, alias="retrainRequired")

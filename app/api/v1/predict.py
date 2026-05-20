@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.response import ApiResponse
 from app.schemas.predict import PredictRequest, PredictResponse
-from app.services.predictor import CalculationError, calculate_prediction
+from app.services.planning_model import CalculationError
+from app.services.predictor import calculate_prediction
 
 router = APIRouter()
 
@@ -24,7 +25,4 @@ def predict(req: PredictRequest, request: Request):
         body = ApiResponse.fail("PREDICTION_FAILED", "예측 계산 중 오류가 발생했습니다.", request.url.path)
         return JSONResponse(status_code=500, content=body.model_dump())
 
-    return ApiResponse.ok(
-        data=PredictResponse.model_validate(result),
-        path=request.url.path,
-    )
+    return ApiResponse.ok(data=result, path=request.url.path)
