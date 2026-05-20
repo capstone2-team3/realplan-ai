@@ -49,6 +49,8 @@ class UpdatedTerm(BaseModel):
     update_method: str | None = Field(default=None, alias="updateMethod")
     residual: float | None = None
     baseline_without_user_type: float | None = Field(default=None, alias="baselineWithoutUserType")
+    type_target: float | None = Field(default=None, alias="typeTarget")
+    baseline_without_type: float | None = Field(default=None, alias="baselineWithoutType")
     reliability: float | None = None
 
 

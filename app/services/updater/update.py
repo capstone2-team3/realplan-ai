@@ -95,19 +95,21 @@ def _update_early_terms(
 ) -> list[dict]:
     """초기 단계의 userGlobal/userTypeEffect를 EMA 방식으로 갱신한다.
 
-    userTypeEffect는 전체 taskType 효과가 아니라 userGlobal과 system prior로
-    설명되지 않는 개인별 type residual을 학습한다.
+    log_alpha_type은 개인 taskType 전체 효과를 저장한다. systemTypeEffect와
+    더해지는 residual이 아니므로, 업데이트 target에서 systemTypeEffect를 빼지 않는다.
     """
 
     old_global = _user_global_or_system_fallback(coefficients)
     new_global = ((1 - EARLY_ETA_GLOBAL) * old_global) + (EARLY_ETA_GLOBAL * clamped_log_ratio)
 
-    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type) or 0.0
     system_type_effect = _system_type_effect(coefficients, keys.task_type)
+    old_type = _mapped_or_scalar(coefficients, "log_alpha_type", keys.task_type)
+    if old_type is None:
+        old_type = system_type_effect
     system_difficulty_effect = _system_difficulty_effect(coefficients, keys.difficulty)
-    baseline_without_user_type = old_global + system_type_effect + system_difficulty_effect
-    type_residual = clamped_log_ratio - baseline_without_user_type
-    new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * type_residual)
+    baseline_without_type = old_global + system_difficulty_effect
+    type_target = clamped_log_ratio - baseline_without_type
+    new_type = ((1 - EARLY_ETA_TYPE) * old_type) + (EARLY_ETA_TYPE * type_target)
 
     return [
         _updated_term(
@@ -122,10 +124,10 @@ def _update_early_terms(
             keys.task_type,
             old_type,
             new_type,
-            "EMA_LOG_RATIO",
+            "EMA_TYPE_TARGET",
             reliability=_shrinkage(counts.task_type),
-            residual=type_residual,
-            baselineWithoutUserType=baseline_without_user_type,
+            typeTarget=type_target,
+            baselineWithoutType=baseline_without_type,
         ),
     ]
 

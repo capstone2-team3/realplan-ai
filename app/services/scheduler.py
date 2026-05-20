@@ -4,15 +4,18 @@
 주어진 가용시간 안에서 '중요도 점수의 합이 최대'가 되는 Task 조합을 선택하고,
 사용자의 focus_stats 기반 시간 슬롯에 (난이도 ↔ 집중도) 매칭으로 배치한다.
 - 마감 긴급도, 보정된 소요시간, 사용자 우선순위를 하나의 점수로 통합
-- 0/1 Knapsack DP로 최적 조합 탐색
+- last_chance(현재 슬롯이 마감 전 유일 슬롯) 태스크는 점수 무시하고 강제 포함
+- 0/1 Knapsack DP로 나머지 후보의 최적 조합 탐색
 - 만족형 등 분할 가능한 Task는 '부분 수행'으로도 후보에 포함
 - Knapsack이 선택한 조합을 (난이도 desc) × (집중도 desc) 그리디로 슬롯에 배치
+- 탈락한 태스크는 사유와 함께 unscheduled 목록으로 노출
 - 3개 변형 플랜(생산성 최적 / 마감 우선 / 워밍업) 제공
 """
 
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -44,6 +47,7 @@ class CandidateTask:
     days_until_deadline: Optional[int]
     user_priority: UserPriority = "MEDIUM"
     difficulty: float = 0.5
+    deadline_min: Optional[int] = None  # 자정 기준 분, 예: 1080 = 18:00
 
 
 @dataclass
@@ -70,12 +74,22 @@ class Assignment:
 
 
 @dataclass
+class UnscheduledItem:
+    task_id: str
+    name: str
+    reason: str            # 예: "마감 18:00 — 이 슬롯 외 수행 불가"
+                           #     "가용시간 부족 — 60분 추가 필요"
+    is_deadline_risk: bool  # 오늘 마감인데 플랜에 못 들어간 경우 True
+
+
+@dataclass
 class RecommendInput:
     candidates: list[CandidateTask]
     available_min: int
+    focus_slots: list[FocusSlot]
+    current_min: int                       # 현재 시각 (자정 기준 분, 예: 960 = 16:00)
     min_split_min: int = 30                # 분할 시 최소 단위
     split_step_min: int = 30               # 분할 시 증가 단위 (30, 60, 90, ...)
-    focus_slots: list[FocusSlot] = field(default_factory=list)
 
 
 @dataclass
@@ -90,17 +104,25 @@ class RecommendedItem:
 
 @dataclass
 class RecommendOutput:
+    plan_name: str
     total_allocated_min: int
     items: list[RecommendedItem]
     leftover_min: int
-    schedule: list[Assignment] = field(default_factory=list)
-    plan_name: str = "생산성 최적"
+    schedule: list[Assignment]
+    unscheduled: list[UnscheduledItem]
 
 
 PRIORITY_WEIGHT: dict[str, float] = {
     "HIGH": 1.5,
     "MEDIUM": 1.0,
     "LOW": 0.6,
+}
+
+# 정렬 키용 — 작을수록 우선.
+PRIORITY_ORDER: dict[str, int] = {
+    "HIGH": 0,
+    "MEDIUM": 1,
+    "LOW": 2,
 }
 
 # 점수 합산 시 각 요소의 비중
@@ -116,6 +138,12 @@ PlanAssigner = Callable[
     [list["RecommendedItem"], dict[str, "CandidateTask"], list["FocusSlot"]],
     list["Assignment"],
 ]
+
+
+def _fmt_clock(minutes: int) -> str:
+    """자정 기준 분 → HH:MM 문자열."""
+    minutes = max(0, minutes)
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 def compute_importance(task: CandidateTask) -> float:
@@ -154,6 +182,45 @@ def corrected_duration_for_slot(base_min: int, difficulty: float, focus: float) 
     gap = max(0.0, min(1.0, difficulty) - min(1.0, focus))
     factor = 1.0 + gap * FOCUS_PENALTY_MAX
     return max(1, int(round(base_min * factor)))
+
+
+def is_last_chance(
+    task: CandidateTask,
+    current_slot: FocusSlot,
+    remaining_slots: list[FocusSlot],
+) -> bool:
+    """
+    현재 슬롯을 포함한 오늘 남은 슬롯들 중 task.deadline_min 이전에
+    task.corrected_min을 수용할 수 있는 슬롯이 현재 슬롯뿐이면 True.
+    task.deadline_min이 None이면 항상 False.
+    """
+    if task.deadline_min is None:
+        return False
+
+    def can_accommodate(slot: FocusSlot) -> bool:
+        return (
+            slot.end_min <= task.deadline_min
+            and slot.available_min >= task.corrected_min
+        )
+
+    if not can_accommodate(current_slot):
+        return False
+    for slot in remaining_slots:
+        if can_accommodate(slot):
+            return False
+    return True
+
+
+def _identify_active_slot(
+    slots: list[FocusSlot],
+    current_min: int,
+) -> tuple[Optional[FocusSlot], list[FocusSlot]]:
+    """current_min 시점에 진행 중이거나 다음으로 도래할 슬롯과 그 이후 슬롯들."""
+    sorted_slots = sorted(slots, key=lambda s: s.start_min)
+    upcoming = [s for s in sorted_slots if s.end_min > current_min]
+    if not upcoming:
+        return None, []
+    return upcoming[0], upcoming[1:]
 
 
 @dataclass
@@ -263,20 +330,124 @@ def _solve_knapsack(
     return selected
 
 
+def _task_sort_key(task: CandidateTask) -> tuple[int, int, float]:
+    """2~4순위: days_until_deadline asc → priority(HIGH<MED<LOW) → -importance."""
+    deadline_days = (
+        task.days_until_deadline
+        if task.days_until_deadline is not None
+        else 10**6
+    )
+    return (
+        deadline_days,
+        PRIORITY_ORDER.get(task.user_priority, 1),
+        -compute_importance(task),
+    )
+
+
+def _build_unscheduled(
+    candidates: list[CandidateTask],
+    selected_ids: set[str],
+    leftover_min: int,
+    pushed_last_chance_ids: set[str],
+) -> list[UnscheduledItem]:
+    """Knapsack에서 탈락한 태스크를 사유와 함께 UnscheduledItem으로 변환."""
+    unscheduled: list[UnscheduledItem] = []
+    for task in candidates:
+        if task.task_id in selected_ids:
+            continue
+
+        is_deadline_risk = (
+            task.deadline_min is not None and task.deadline_min < 1440
+        )
+
+        if task.task_id in pushed_last_chance_ids:
+            deadline_str = (
+                _fmt_clock(task.deadline_min)
+                if task.deadline_min is not None
+                else "—"
+            )
+            reason = f"마감 {deadline_str} — 이 슬롯 외 수행 불가"
+        else:
+            shortage = max(0, task.corrected_min - max(0, leftover_min))
+            reason = f"가용시간 부족 — {shortage}분 추가 필요"
+
+        unscheduled.append(UnscheduledItem(
+            task_id=task.task_id,
+            name=task.name,
+            reason=reason,
+            is_deadline_risk=is_deadline_risk,
+        ))
+    return unscheduled
+
+
 def recommend_combo(inp: RecommendInput) -> RecommendOutput:
     if inp.available_min <= 0 or not inp.candidates:
-        return RecommendOutput(total_allocated_min=0, items=[], leftover_min=inp.available_min)
+        return RecommendOutput(
+            plan_name="생산성 최적",
+            total_allocated_min=0,
+            items=[],
+            leftover_min=inp.available_min,
+            schedule=[],
+            unscheduled=[],
+        )
+
+    tasks_by_id = {t.task_id: t for t in inp.candidates}
+
+    # ── 1순위: last_chance 강제 포함 ─────────────────────────────────────────
+    current_slot, remaining_slots = _identify_active_slot(
+        inp.focus_slots, inp.current_min
+    )
+    last_chance_ids: set[str] = set()
+    if current_slot is not None:
+        for task in inp.candidates:
+            if is_last_chance(task, current_slot, remaining_slots):
+                last_chance_ids.add(task.task_id)
+
+    forced_items: list[RecommendedItem] = []
+    forced_total = 0
+    # 정렬 키대로 처리 — 동일 슬롯을 두고 last_chance끼리 경합하면
+    # deadline asc → priority → importance 우선이 먼저 자리를 차지한다.
+    pushed_last_chance: set[str] = set()
+    last_chance_tasks = sorted(
+        (t for t in inp.candidates if t.task_id in last_chance_ids),
+        key=_task_sort_key,
+    )
+    slot_capacity = current_slot.available_min if current_slot is not None else 0
+    used_in_current_slot = 0
+    for task in last_chance_tasks:
+        # 무조건 선택 — 가용시간을 초과해도 그대로 포함한다(사용자가 최종 결정).
+        # 다만, 같은 current_slot을 두고 경합해 물리적으로 도저히 들어갈 수 없는
+        # 케이스는 unscheduled 사유 분기를 위해 'pushed'로 표시한다.
+        if used_in_current_slot + task.corrected_min > slot_capacity and forced_items:
+            pushed_last_chance.add(task.task_id)
+            continue
+        forced_items.append(RecommendedItem(
+            task_id=task.task_id,
+            name=task.name,
+            allocated_min=task.corrected_min,
+            is_partial=False,
+            importance_score=compute_importance(task),
+            reason="last_chance — 마감 전 유일 슬롯",
+        ))
+        forced_total += task.corrected_min
+        used_in_current_slot += task.corrected_min
+
+    # ── 2~4순위: 나머지 후보를 Knapsack에 투입 ───────────────────────────────
+    remaining_candidates = [
+        t for t in inp.candidates
+        if t.task_id not in last_chance_ids
+    ]
+    remaining_budget = max(0, inp.available_min - forced_total)
 
     groups = _expand_candidates(
-        inp.candidates,
-        inp.available_min,
+        remaining_candidates,
+        remaining_budget,
         inp.min_split_min,
         inp.split_step_min,
     )
+    selected = _solve_knapsack(groups, remaining_budget)
 
-    selected = _solve_knapsack(groups, inp.available_min)
-
-    items = [
+    knapsack_items = [
         RecommendedItem(
             task_id=s.task_id,
             name=s.name,
@@ -291,13 +462,41 @@ def recommend_combo(inp: RecommendInput) -> RecommendOutput:
         )
         for s in selected
     ]
-    items.sort(key=lambda x: x.importance_score, reverse=True)
+
+    items = forced_items + knapsack_items
+
+    # 최종 정렬: 마감 → 우선순위 → 중요도(desc).
+    def _item_sort_key(it: RecommendedItem) -> tuple[int, int, float]:
+        task = tasks_by_id[it.task_id]
+        return (
+            task.days_until_deadline
+            if task.days_until_deadline is not None
+            else 10**6,
+            PRIORITY_ORDER.get(task.user_priority, 1),
+            -it.importance_score,
+        )
+
+    items.sort(key=_item_sort_key)
 
     total = sum(item.allocated_min for item in items)
+    leftover = inp.available_min - total
+
+    # ── 슬롯 배치 ───────────────────────────────────────────────────────────
+    schedule = assign_tasks_to_slots(items, tasks_by_id, inp.focus_slots)
+
+    # ── 탈락 태스크 → UnscheduledItem ───────────────────────────────────────
+    selected_ids = {it.task_id for it in items}
+    unscheduled = _build_unscheduled(
+        inp.candidates, selected_ids, leftover, pushed_last_chance
+    )
+
     return RecommendOutput(
+        plan_name="생산성 최적",
         total_allocated_min=total,
         items=items,
-        leftover_min=inp.available_min - total,
+        leftover_min=leftover,
+        schedule=schedule,
+        unscheduled=unscheduled,
     )
 
 
@@ -440,16 +639,20 @@ def assign_tasks_to_slots(
     slots: list[FocusSlot],
 ) -> list[Assignment]:
     """
-    기본 "생산성 최적" 전략: 난이도 desc × 집중도 desc 페어링.
+    그리디 배치 — "생산성 최적" 전략:
+      1. 태스크를 난이도 내림차순 정렬
+      2. 슬롯을 predicted_focus 내림차순 정렬
+      3. 순서대로 쌍을 맺어 배치 (가장 어려운 태스크 → 가장 집중도 높은 슬롯)
+      4. 슬롯에 태스크가 완전히 안 들어가면
+         - splittable=True → 슬롯 잔여시간만큼 분할 배치
+         - splittable=False → 다음 슬롯으로 이동
+      5. 반환은 start_min 오름차순
 
-    Cold-start: slots가 비었거나 모든 predicted_focus == 0.0 이면 우선순위 기반
-    시간순 배치로 폴백한다.
+    Cold-start: slots가 비었거나 모든 predicted_focus == 0.0이면
+    우선순위 기반 시간순 폴백 배치로 전환하고 경고를 발생시킨다.
     """
     if not slots or all(s.predicted_focus == 0.0 for s in slots):
-        logger.warning(
-            "focus_slots missing or all-zero predicted_focus; "
-            "falling back to chronological priority assignment."
-        )
+        warnings.warn("focus_slots 데이터 없음 — 우선순위 순 폴백 배치 적용")
         return _fallback_assign_chronological(selected, tasks_by_id, slots)
 
     pairs = [
@@ -529,13 +732,18 @@ def generate_plans(inp: RecommendInput) -> list[RecommendOutput]:
 
     outputs: list[RecommendOutput] = []
     for name, assigner in variants:
-        schedule = assigner(base.items, tasks_by_id, inp.focus_slots)
+        schedule = (
+            base.schedule
+            if name == "생산성 최적"
+            else assigner(base.items, tasks_by_id, inp.focus_slots)
+        )
         outputs.append(RecommendOutput(
+            plan_name=name,
             total_allocated_min=base.total_allocated_min,
             items=list(base.items),
             leftover_min=base.leftover_min,
             schedule=schedule,
-            plan_name=name,
+            unscheduled=list(base.unscheduled),
         ))
     return outputs
 
@@ -548,67 +756,86 @@ def generate_plans(inp: RecommendInput) -> list[RecommendOutput]:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+    # 태스크 3개 — 마감/우선순위/난이도 각기 다르게.
     candidates = [
         CandidateTask(
             task_id="t1",
-            name="알고리즘 과제 (어려움)",
+            name="알고리즘 과제 (오늘 18:00 마감, 어려움)",
             task_type=TaskType.SCOPE_BOUND,
             splittable=True,
-            corrected_min=120,
-            days_until_deadline=1,
+            corrected_min=60,
+            days_until_deadline=0,
             user_priority="HIGH",
             difficulty=0.9,
+            deadline_min=1080,   # 18:00
         ),
         CandidateTask(
             task_id="t2",
-            name="영어 단어 암기",
+            name="영어 단어 암기 (내일 마감, 보통)",
             task_type=TaskType.SATISFACTION_BOUND,
             splittable=True,
-            corrected_min=60,
-            days_until_deadline=3,
-            user_priority="MEDIUM",
-            difficulty=0.3,
-        ),
-        CandidateTask(
-            task_id="t3",
-            name="강의 영상 시청",
-            task_type=TaskType.TIME_BOUND,
-            splittable=False,
             corrected_min=90,
-            days_until_deadline=2,
+            days_until_deadline=1,
             user_priority="MEDIUM",
             difficulty=0.5,
         ),
+        CandidateTask(
+            task_id="t3",
+            name="강의 영상 시청 (마감 없음, 쉬움)",
+            task_type=TaskType.TIME_BOUND,
+            splittable=False,
+            corrected_min=120,
+            days_until_deadline=None,
+            user_priority="LOW",
+            difficulty=0.3,
+        ),
     ]
 
+    # FocusSlot 2개 — 16:00~18:00, 20:00~21:00.
     focus_slots = [
-        # 09:00 ~ 11:00, 높은 집중도
-        FocusSlot(start_min=540, end_min=660, predicted_focus=0.85),
-        # 14:00 ~ 16:00, 중간 집중도
-        FocusSlot(start_min=840, end_min=960, predicted_focus=0.55),
+        FocusSlot(start_min=960, end_min=1080, predicted_focus=0.9),   # 16:00–18:00
+        FocusSlot(start_min=1200, end_min=1260, predicted_focus=0.6),  # 20:00–21:00
     ]
 
     inp = RecommendInput(
         candidates=candidates,
-        available_min=240,
+        available_min=180,
         focus_slots=focus_slots,
+        current_min=960,   # 16:00
     )
 
-    def fmt_clock(m: int) -> str:
-        return f"{m // 60:02d}:{m % 60:02d}"
+    out = recommend_combo(inp)
 
-    plans = generate_plans(inp)
-    for plan in plans:
-        print(f"\n=== [{plan.plan_name}] ===")
+    print(f"=== [{out.plan_name}] ===")
+    print(
+        f"total={out.total_allocated_min}분, "
+        f"leftover={out.leftover_min}분, "
+        f"items={len(out.items)}, "
+        f"schedule={len(out.schedule)}, "
+        f"unscheduled={len(out.unscheduled)}"
+    )
+
+    print("\n[배치된 플랜]")
+    for a in out.schedule:
+        tag = "부분" if a.is_partial else "전체"
         print(
-            f"total={plan.total_allocated_min}분, "
-            f"leftover={plan.leftover_min}분, "
-            f"items={len(plan.items)}, schedule={len(plan.schedule)}"
+            f"  {_fmt_clock(a.start_min)}–{_fmt_clock(a.end_min)} "
+            f"({a.allocated_min:>3}분, focus={a.slot_focus:.2f}) "
+            f"[{tag}] {a.name}"
         )
-        for a in plan.schedule:
-            tag = "부분" if a.is_partial else "전체"
-            print(
-                f"  {fmt_clock(a.start_min)}–{fmt_clock(a.end_min)} "
-                f"({a.allocated_min:>3}분, focus={a.slot_focus:.2f}) "
-                f"[{tag}] {a.name}"
-            )
+
+    print("\n[선택된 items]")
+    for it in out.items:
+        tag = "부분" if it.is_partial else "전체"
+        print(
+            f"  {it.allocated_min:>3}분 [{tag}] "
+            f"score={it.importance_score:.3f} — {it.name} "
+            f"({it.reason})"
+        )
+
+    print("\n[Unscheduled]")
+    if not out.unscheduled:
+        print("  (없음)")
+    for u in out.unscheduled:
+        risk = " ⚠오늘마감" if u.is_deadline_risk else ""
+        print(f"  - {u.name}{risk}: {u.reason}")

@@ -148,16 +148,51 @@ class TestPredictCoefficientLogic:
         payload["counts"]["taskType"] = 5
         out = _predict_result(payload)
         r_type = 5 / 15
-        expected_log = math.log(1.1) + 0.10 + 0.18 + (r_type * math.log(1.2))
+        expected_type_effect = ((1 - r_type) * 0.10) + (r_type * math.log(1.2))
+        expected_log = math.log(1.1) + expected_type_effect + 0.18
         assert out["stage"] == "EARLY"
         assert out["logCorrection"] == expected_log
         assert out["predictedMinutes"] == round(100 * math.exp(expected_log))
         assert [term["term"] for term in out["usedTerms"]] == [
             "userGlobal",
             "systemTypeEffect",
-            "systemDifficultyEffect",
             "userTypeEffect",
+            "systemDifficultyEffect",
         ]
+        system_type_term = next(term for term in out["usedTerms"] if term["term"] == "systemTypeEffect")
+        user_type_term = next(term for term in out["usedTerms"] if term["term"] == "userTypeEffect")
+        assert system_type_term["reliability"] == pytest.approx(1 - r_type)
+        assert system_type_term["contribution"] == pytest.approx((1 - r_type) * 0.10)
+        assert user_type_term["reliability"] == pytest.approx(r_type)
+        assert user_type_term["contribution"] == pytest.approx(r_type * math.log(1.2))
+
+    def test_early_user_type_falls_back_to_system_type_effect(self):
+        payload = _predict_payload(total_completed=10)
+        payload["task"]["estimatedMinutes"] = 100
+        payload["task"]["taskType"] = "SATISFACTION_BOUND"
+        payload["coefficients"]["logAlphaGlobal"] = 0.14
+        payload["coefficients"]["systemTypeEffect"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
+        payload["counts"]["taskType"] = 5
+        out = _predict_result(payload)
+        user_type_term = next(term for term in out["usedTerms"] if term["term"] == "userTypeEffect")
+
+        assert out["logCorrection"] == pytest.approx(0.42)
+        assert user_type_term["weight"] == pytest.approx(0.10)
+
+    def test_early_example_blends_system_and_user_type_effects(self):
+        payload = _predict_payload(total_completed=10)
+        payload["task"]["estimatedMinutes"] = 100
+        payload["task"]["taskType"] = "SATISFACTION_BOUND"
+        payload["coefficients"]["logAlphaGlobal"] = 0.14
+        payload["coefficients"]["logAlphaType"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemTypeEffect"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
+        payload["counts"]["taskType"] = 5
+        out = _predict_result(payload)
+
+        assert out["logCorrection"] == pytest.approx(0.42)
+        assert out["predictedMinutes"] == round(100 * math.exp(0.42))
 
     def test_early_falls_back_to_system_global_prior_for_new_user(self):
         payload = _predict_payload(total_completed=10)
@@ -267,18 +302,43 @@ class TestUpdateCoefficientLogic:
         payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
         out = _update_result(payload)
         expected_log_ratio = math.log(95 / 60)
-        expected_baseline = old_global + 0.10 + 0.18
+        expected_baseline = old_global + 0.18
         expected_residual = expected_log_ratio - expected_baseline
 
         assert [term["term"] for term in out["updatedTerms"]] == [
             "LOG_ALPHA_GLOBAL",
             "LOG_ALPHA_TYPE",
         ]
-        assert all(term["updateMethod"] == "EMA_LOG_RATIO" for term in out["updatedTerms"])
         type_term = out["updatedTerms"][1]
-        assert type_term["baselineWithoutUserType"] == expected_baseline
-        assert type_term["residual"] == expected_residual
+        assert out["updatedTerms"][0]["updateMethod"] == "EMA_LOG_RATIO"
+        assert type_term["updateMethod"] == "EMA_TYPE_TARGET"
+        assert type_term["baselineWithoutType"] == expected_baseline
+        assert type_term["typeTarget"] == expected_residual
         assert type_term["newWeight"] == 0.15 * expected_residual
+
+    def test_early_type_update_learns_user_task_type_total_effect(self):
+        payload = _update_payload(total_completed=10)
+        payload["completedTask"]["estimatedMinutes"] = 100
+        payload["completedTask"]["predictedMinutes"] = round(100 * math.exp(0.42))
+        payload["completedTask"]["actualMinutes"] = 180
+        payload["completedTask"]["taskType"] = "SATISFACTION_BOUND"
+        payload["coefficients"]["logAlphaGlobal"] = 0.14
+        payload["coefficients"]["logAlphaType"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemTypeEffect"] = {"taskType:SATISFACTION_BOUND": 0.10}
+        payload["coefficients"]["systemDifficultyEffect"] = {"difficulty:HARD": 0.18}
+        payload["counts"]["taskType"] = 5
+        out = _update_result(payload)
+        type_term = out["updatedTerms"][1]
+        clamped_log_ratio = math.log(1.8)
+        expected_baseline = 0.14 + 0.18
+        expected_target = clamped_log_ratio - expected_baseline
+        expected_new_type = (0.85 * 0.10) + (0.15 * expected_target)
+
+        assert type_term["oldWeight"] == pytest.approx(0.10)
+        assert type_term["baselineWithoutType"] == pytest.approx(expected_baseline)
+        assert type_term["typeTarget"] == pytest.approx(expected_target)
+        assert type_term["newWeight"] == pytest.approx(expected_new_type)
+        assert type_term["newWeight"] == pytest.approx(0.1252, abs=0.0001)
 
     def test_main_effect_retrain_required_every_10_records(self):
         payload = _update_payload(total_completed=80)
@@ -349,7 +409,7 @@ class TestRidgeDropReferenceEncoding:
         ]
         out = fit_ridge_coefficients(history, "MAIN_EFFECT")
 
-        assert out["modelVersion"] == "v2.2.0"
+        assert out["modelVersion"] == "v2.3.0"
         assert out["encoding"]["fitIntercept"] is True
         assert out["encoding"]["dropReferenceCategory"] is True
         assert out["encoding"]["references"]["difficulty"] == "difficulty:NORMAL"
@@ -386,7 +446,7 @@ class TestSystemPriorFit:
         expected_type_a_raw = ((values[0] + values[1]) / 2) - expected_global
         expected_hard_raw = ((values[1] + values[2]) / 2) - expected_global
 
-        assert out["modelVersion"] == "v2.2.0"
+        assert out["modelVersion"] == "v2.3.0"
         assert out["statistic"] == "MEAN_CLAMPED_LOG_RATIO"
         assert global_term["weight"] == expected_global
         assert type_a["rawEffect"] == expected_type_a_raw

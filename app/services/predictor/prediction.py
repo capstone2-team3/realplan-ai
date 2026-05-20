@@ -103,8 +103,9 @@ def _calculate_early_log_correction(
 ) -> tuple[float, list[dict]]:
     """초기 단계 보정값을 계산한다.
 
-    systemTypeEffect/systemDifficultyEffect는 systemGlobalPrior 대비 추가 효과이고,
-    userTypeEffect는 system prior와 userGlobal로 설명되지 않는 개인 잔차다.
+    taskType 효과는 앱 전체 systemTypeEffect와 개인 userTypeEffect를 count 신뢰도로
+    블렌딩한다. log_alpha_type 필드는 개인 taskType 전체 효과로 해석하며,
+    systemTypeEffect 위에 더하는 residual이 아니다.
     """
 
     user_global = _user_global_or_system_fallback(coefficients)
@@ -116,16 +117,24 @@ def _calculate_early_log_correction(
         keys.task_type,
     )
     if user_type_effect is None:
-        user_type_effect = 0.0
+        user_type_effect = system_type_effect
 
     r_type = _shrinkage(counts.task_type)
+    system_type_contribution = (1 - r_type) * system_type_effect
+    user_type_contribution = r_type * user_type_effect
     return (
-        user_global + system_type_effect + system_difficulty_effect + (r_type * user_type_effect),
+        user_global + system_type_contribution + user_type_contribution + system_difficulty_effect,
         [
             _term("userGlobal", "global", user_global, 1.0, user_global),
-            _term("systemTypeEffect", keys.task_type, system_type_effect, 1.0, system_type_effect),
-            _term("systemDifficultyEffect", keys.difficulty, system_difficulty_effect, 1.0, system_difficulty_effect),
-            _term("userTypeEffect", keys.task_type, user_type_effect, r_type, r_type * user_type_effect),
+            _term("systemTypeEffect", keys.task_type, system_type_effect, 1 - r_type, system_type_contribution),
+            _term("userTypeEffect", keys.task_type, user_type_effect, r_type, user_type_contribution),
+            _term(
+                "systemDifficultyEffect",
+                keys.difficulty,
+                system_difficulty_effect,
+                1.0,
+                system_difficulty_effect,
+            ),
         ],
     )
 

@@ -80,8 +80,8 @@ def test_predict_early_uses_common_success_format(client):
     assert [term["term"] for term in data["usedTerms"]] == [
         "userGlobal",
         "systemTypeEffect",
-        "systemDifficultyEffect",
         "userTypeEffect",
+        "systemDifficultyEffect",
     ]
 
 

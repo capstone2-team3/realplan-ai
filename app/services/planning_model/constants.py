@@ -7,7 +7,7 @@ import math
 from app.services.classifier import TaskType
 
 
-MODEL_VERSION = "v2.2.0"
+MODEL_VERSION = "v2.3.0"
 
 STAGE_EARLY = "EARLY"
 STAGE_MAIN_EFFECT = "MAIN_EFFECT"
