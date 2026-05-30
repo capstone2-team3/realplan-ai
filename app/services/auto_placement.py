@@ -376,7 +376,6 @@ def calculate_placement_score(
     avg_focus = sum(slots[index].focus_score for index in candidate_indices) / len(candidate_indices)
     focus_match_score = calculate_focus_fit_score(avg_focus, session.requiredFocusLevel)
     block_fit_score = calculate_block_fit_score(slots, candidate_indices)
-    continuity_score = calculate_continuity_score(slots, candidate_indices, task.taskId)
 
     if task.isDueToday:
         early_score = calculate_early_placement_score(
@@ -384,16 +383,14 @@ def calculate_placement_score(
             total_slot_count=len(slots),
         )
         return (
-            0.45 * early_score
+            0.60 * early_score
             + 0.25 * focus_match_score
             + 0.15 * block_fit_score
-            + 0.15 * continuity_score
         )
 
     return (
-        0.50 * focus_match_score
-        + 0.30 * block_fit_score
-        + 0.20 * continuity_score
+        0.65 * focus_match_score
+        + 0.35 * block_fit_score
     )
 
 
@@ -449,40 +446,6 @@ def calculate_block_fit_score(slots: list[Slot], candidate_indices: list[int]) -
         score -= 10
 
     return max(0.0, min(100.0, score))
-
-
-def calculate_continuity_score(
-    slots: list[Slot],
-    candidate_indices: list[int],
-    task_id: int,
-) -> float:
-    """같은 taskId의 기존 배치와 가까울수록 높은 점수를 준다."""
-
-    occupied_same_task_indices = [
-        index for index, slot in enumerate(slots) if slot.occupied and slot.task_id == task_id
-    ]
-    if not occupied_same_task_indices:
-        return 50.0
-
-    candidate_block_indices = {slots[index].block_index for index in candidate_indices}
-    min_distance = min(
-        min(abs(candidate_index - occupied_index) for candidate_index in candidate_indices)
-        for occupied_index in occupied_same_task_indices
-    )
-
-    if min_distance == 1:
-        return 100.0
-
-    same_block_distances = [
-        min(abs(candidate_index - occupied_index) for candidate_index in candidate_indices)
-        for occupied_index in occupied_same_task_indices
-        if slots[occupied_index].block_index in candidate_block_indices
-    ]
-    if same_block_distances:
-        same_block_distance = min(same_block_distances)
-        return max(70.0, 100.0 - same_block_distance * 10)
-
-    return max(30.0, 60.0 - min_distance * 5)
 
 
 def _occupy_slots(slots: list[Slot], indices: list[int], task_id: int) -> None:
@@ -615,6 +578,9 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
 
     for session in sorted_sessions:
         task = task_map[session.taskId]
+        # OpenAI가 제안한 sessionMinutes는 먼저 연속 배치로 보존을 시도한다.
+        # 연속 배치가 불가능할 때만 30분 atomic chunk로 재분할한다.
+        # 같은 taskId를 의도적으로 가까이 붙이는 점수는 사용하지 않는다.
         block = place_session_continuously(
             slots=slots,
             session=session,

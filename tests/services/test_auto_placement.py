@@ -310,25 +310,35 @@ def test_regular_high_task_prefers_late_high_focus_slot():
     ]
 
 
-def test_atomic_chunks_prefer_adjacent_slots_when_possible():
+def test_recommended_session_length_is_preserved_when_continuous_slot_exists():
+    response = auto_place_sessions(_request())
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(taskId=1, start="09:00", end="10:00", durationMinutes=60)
+    ]
+
+
+def test_atomic_chunks_follow_focus_and_block_fit_without_adjacency_bonus():
     req = _request(
         schedulableTimeBlocks=[
             dict(start="09:00", end="09:30", durationMinutes=30),
-            dict(start="10:00", end="11:00", durationMinutes=60),
+            dict(start="10:00", end="10:30", durationMinutes=30),
+            dict(start="15:00", end="15:30", durationMinutes=30),
         ],
         focusTimeSlots=[
             dict(start="09:00", end="09:30", focusScore=80),
-            dict(start="10:00", end="11:00", focusScore=80),
+            dict(start="10:00", end="10:30", focusScore=80),
+            dict(start="15:00", end="15:30", focusScore=95),
         ],
-        tasks=[_task(1, 90, is_due_today=False, recommend_score=80, difficulty="HIGH")],
-        taskSessions=[_session(1, 90, required_focus_level="HIGH")],
+        tasks=[_task(1, 60, is_due_today=False, recommend_score=80, difficulty="HIGH")],
+        taskSessions=[_session(1, 60, required_focus_level="HIGH")],
     )
 
     response = auto_place_sessions(req)
 
     assert response.scheduleBlocks == [
         ScheduleBlock(taskId=1, start="09:00", end="09:30", durationMinutes=30),
-        ScheduleBlock(taskId=1, start="10:00", end="11:00", durationMinutes=60),
+        ScheduleBlock(taskId=1, start="15:00", end="15:30", durationMinutes=30),
     ]
 
 
