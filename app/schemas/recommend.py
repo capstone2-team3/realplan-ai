@@ -36,5 +36,4 @@ class RecommendedItemDTO(BaseModel):
 class RecommendResponse(BaseModel):
     total_allocated_min: int
     leftover_min: int
-    plan_name: str = "생산성 최적"
     items: list[RecommendedItemDTO]
