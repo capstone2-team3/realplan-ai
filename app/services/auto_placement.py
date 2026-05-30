@@ -233,7 +233,44 @@ def find_best_continuous_position(
     task: PlacementTask,
     slot_unit_minutes: int,
 ) -> Optional[list[int]]:
-    """세션을 그대로 넣을 수 있는 가장 좋은 연속 슬롯 인덱스를 찾는다."""
+    """마감 태스크는 가장 이른 후보, 일반 태스크는 focusScore 최적 후보를 찾는다."""
+
+    if task.isDueToday:
+        return find_earliest_continuous_position(
+            slots=slots,
+            session_minutes=session.sessionMinutes,
+            slot_unit_minutes=slot_unit_minutes,
+        )
+
+    return find_best_focus_matched_continuous_position(
+        slots=slots,
+        session=session,
+        slot_unit_minutes=slot_unit_minutes,
+    )
+
+
+def find_earliest_continuous_position(
+    slots: list[Slot],
+    session_minutes: int,
+    slot_unit_minutes: int,
+) -> Optional[list[int]]:
+    """앞에서부터 순회하며 첫 번째 연속 빈 후보를 반환한다."""
+
+    needed_count = session_minutes // slot_unit_minutes
+    for start_index in range(0, len(slots) - needed_count + 1):
+        indices = list(range(start_index, start_index + needed_count))
+        candidate = [slots[index] for index in indices]
+        if _is_continuous_empty_candidate(candidate):
+            return indices
+    return None
+
+
+def find_best_focus_matched_continuous_position(
+    slots: list[Slot],
+    session: PlacementTaskSession,
+    slot_unit_minutes: int,
+) -> Optional[list[int]]:
+    """일반 태스크용: focusMatchScore가 가장 높은 연속 후보를 찾는다."""
 
     needed_count = session.sessionMinutes // slot_unit_minutes
     best_indices: list[int] | None = None
@@ -245,13 +282,8 @@ def find_best_continuous_position(
         if not _is_continuous_empty_candidate(candidate):
             continue
 
-        score = calculate_placement_score(
-            slots=slots,
-            candidate_indices=indices,
-            session=session,
-            task=task,
-            slot_unit_minutes=slot_unit_minutes,
-        )
+        avg_focus = sum(slot.focus_score for slot in candidate) / needed_count
+        score = calculate_focus_fit_score(avg_focus, session.requiredFocusLevel)
         if best_score is None or score > best_score:
             best_score = score
             best_indices = indices
@@ -342,6 +374,27 @@ def _find_best_atomic_slot_index(
     task: PlacementTask,
     slot_unit_minutes: int,
 ) -> int | None:
+    if task.isDueToday:
+        return _find_earliest_empty_slot_index(slots)
+
+    return _find_best_focus_matched_atomic_slot_index(slots, session)
+
+
+def _find_earliest_empty_slot_index(slots: list[Slot]) -> int | None:
+    """앞에서부터 비어 있는 첫 슬롯을 반환한다."""
+
+    for index, slot in enumerate(slots):
+        if not slot.occupied:
+            return index
+    return None
+
+
+def _find_best_focus_matched_atomic_slot_index(
+    slots: list[Slot],
+    session: PlacementTaskSession,
+) -> int | None:
+    """일반 태스크용: focusMatchScore가 가장 높은 빈 슬롯을 찾는다."""
+
     best_index: int | None = None
     best_score: float | None = None
 
@@ -349,103 +402,13 @@ def _find_best_atomic_slot_index(
         if slot.occupied:
             continue
 
-        score = calculate_placement_score(
-            slots=slots,
-            candidate_indices=[index],
-            session=session,
-            task=task,
-            slot_unit_minutes=slot_unit_minutes,
-        )
+        score = calculate_focus_fit_score(slot.focus_score, session.requiredFocusLevel)
 
         if best_score is None or score > best_score:
             best_score = score
             best_index = index
 
     return best_index
-
-
-def calculate_placement_score(
-    slots: list[Slot],
-    candidate_indices: list[int],
-    session: PlacementTaskSession,
-    task: PlacementTask,
-    slot_unit_minutes: int,
-) -> float:
-    """오늘 마감/일반 태스크 정책을 분리한 통합 후보 점수."""
-
-    avg_focus = sum(slots[index].focus_score for index in candidate_indices) / len(candidate_indices)
-    focus_match_score = calculate_focus_fit_score(avg_focus, session.requiredFocusLevel)
-    block_fit_score = calculate_block_fit_score(slots, candidate_indices)
-
-    if task.isDueToday:
-        early_score = calculate_early_placement_score(
-            candidate_start_index=candidate_indices[0],
-            total_slot_count=len(slots),
-        )
-        return (
-            0.60 * early_score
-            + 0.25 * focus_match_score
-            + 0.15 * block_fit_score
-        )
-
-    return (
-        0.65 * focus_match_score
-        + 0.35 * block_fit_score
-    )
-
-
-def calculate_early_placement_score(
-    candidate_start_index: int,
-    total_slot_count: int,
-) -> float:
-    """slots 배열 앞쪽 후보일수록 높은 점수를 준다."""
-
-    return 100 * (1 - candidate_start_index / max(1, total_slot_count - 1))
-
-
-def calculate_block_fit_score(slots: list[Slot], candidate_indices: list[int]) -> float:
-    """후보가 현재 빈 block을 얼마나 깔끔하게 쓰는지 0~100으로 점수화한다."""
-
-    candidate_slots = [slots[index] for index in candidate_indices]
-    block_index = candidate_slots[0].block_index
-    candidate_start = candidate_indices[0]
-    candidate_end = candidate_indices[-1]
-
-    left_edge = candidate_start
-    while (
-        left_edge - 1 >= 0
-        and slots[left_edge - 1].block_index == block_index
-        and not slots[left_edge - 1].occupied
-    ):
-        left_edge -= 1
-
-    right_edge = candidate_end
-    while (
-        right_edge + 1 < len(slots)
-        and slots[right_edge + 1].block_index == block_index
-        and not slots[right_edge + 1].occupied
-    ):
-        right_edge += 1
-
-    touches_left = candidate_start == left_edge
-    touches_right = candidate_end == right_edge
-    score = 70.0
-
-    if touches_left:
-        score += 15
-    if touches_right:
-        score += 15
-    if not touches_left and not touches_right:
-        score -= 20
-
-    left_remaining = candidate_start - left_edge
-    right_remaining = right_edge - candidate_end
-    if left_remaining == 1:
-        score -= 10
-    if right_remaining == 1:
-        score -= 10
-
-    return max(0.0, min(100.0, score))
 
 
 def _occupy_slots(slots: list[Slot], indices: list[int], task_id: int) -> None:

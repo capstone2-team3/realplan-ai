@@ -268,14 +268,14 @@ def test_focus_fit_score_policy():
     assert calculate_focus_fit_score(10, "FLEXIBLE") == 50
 
 
-def test_due_today_task_prefers_early_slot_over_late_high_focus_slot():
+def test_due_today_task_ignores_focus_and_uses_earliest_continuous_slot():
     req = _request(
         schedulableTimeBlocks=[
             dict(start="09:00", end="10:00", durationMinutes=60),
             dict(start="15:00", end="16:00", durationMinutes=60),
         ],
         focusTimeSlots=[
-            dict(start="09:00", end="10:00", focusScore=60),
+            dict(start="09:00", end="10:00", focusScore=40),
             dict(start="15:00", end="16:00", focusScore=95),
         ],
         tasks=[_task(1, 60, is_due_today=True, recommend_score=80, difficulty="HIGH")],
@@ -318,7 +318,7 @@ def test_recommended_session_length_is_preserved_when_continuous_slot_exists():
     ]
 
 
-def test_atomic_chunks_follow_focus_and_block_fit_without_adjacency_bonus():
+def test_regular_high_atomic_chunks_choose_highest_focus_slots():
     req = _request(
         schedulableTimeBlocks=[
             dict(start="09:00", end="09:30", durationMinutes=30),
@@ -339,6 +339,49 @@ def test_atomic_chunks_follow_focus_and_block_fit_without_adjacency_bonus():
     assert response.scheduleBlocks == [
         ScheduleBlock(taskId=1, start="09:00", end="09:30", durationMinutes=30),
         ScheduleBlock(taskId=1, start="15:00", end="15:30", durationMinutes=30),
+    ]
+
+
+def test_regular_task_ties_on_focus_choose_earlier_continuous_slot():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(start="09:00", end="10:00", durationMinutes=60),
+            dict(start="15:00", end="16:00", durationMinutes=60),
+        ],
+        focusTimeSlots=[
+            dict(start="09:00", end="10:00", focusScore=80),
+            dict(start="15:00", end="16:00", focusScore=80),
+        ],
+        tasks=[_task(1, 60, is_due_today=False, recommend_score=80, difficulty="HIGH")],
+        taskSessions=[_session(1, 60, required_focus_level="HIGH")],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(taskId=1, start="09:00", end="10:00", durationMinutes=60)
+    ]
+
+
+def test_due_today_atomic_chunks_use_earliest_empty_slots():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(start="09:00", end="09:30", durationMinutes=30),
+            dict(start="11:00", end="11:30", durationMinutes=30),
+        ],
+        focusTimeSlots=[
+            dict(start="09:00", end="09:30", focusScore=30),
+            dict(start="11:00", end="11:30", focusScore=95),
+        ],
+        tasks=[_task(1, 60, is_due_today=True, recommend_score=80, difficulty="HIGH")],
+        taskSessions=[_session(1, 60, required_focus_level="HIGH")],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(taskId=1, start="09:00", end="09:30", durationMinutes=30),
+        ScheduleBlock(taskId=1, start="11:00", end="11:30", durationMinutes=30),
     ]
 
 
