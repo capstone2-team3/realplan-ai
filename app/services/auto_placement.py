@@ -28,6 +28,7 @@ FOCUS_LEVEL_PRIORITY = {
 }
 ALLOWED_FOCUS_LEVELS = set(FOCUS_LEVEL_PRIORITY)
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
+MAX_CONTINUOUS_SCHEDULABLE_MINUTES = 90
 
 
 @dataclass
@@ -69,6 +70,11 @@ def validate_auto_placement_request(request: AutoPlacementRequest) -> None:
     slot_unit = request.slotUnitMinutes
     if slot_unit != 30:
         raise ValueError("slotUnitMinutes는 30이어야 합니다.")
+    if request.maxContinuousSchedulableMinutes is not None:
+        if request.maxContinuousSchedulableMinutes < slot_unit:
+            raise ValueError("maxContinuousSchedulableMinutes는 slotUnitMinutes 이상이어야 합니다.")
+        if request.maxContinuousSchedulableMinutes % slot_unit != 0:
+            raise ValueError("maxContinuousSchedulableMinutes는 slotUnitMinutes의 배수여야 합니다.")
     if not request.schedulableTimeBlocks:
         raise ValueError("schedulableTimeBlocks는 비어 있을 수 없습니다.")
     if not request.tasks:
@@ -208,14 +214,14 @@ def sort_task_sessions(
     sessions: list[PlacementTaskSession],
     task_map: dict[int, PlacementTask],
 ) -> list[PlacementTaskSession]:
-    """마감, 집중도, 추천점수, 세션 길이 순으로 세션을 정렬한다."""
+    """마감, 추천점수, 집중도, 세션 길이 순으로 세션을 정렬한다."""
 
     return sorted(
         sessions,
         key=lambda session: (
             not task_map[session.taskId].isDueToday,
-            -FOCUS_LEVEL_PRIORITY[session.requiredFocusLevel],
             -task_map[session.taskId].recommendScore,
+            -FOCUS_LEVEL_PRIORITY[session.requiredFocusLevel],
             -session.sessionMinutes,
         ),
     )
@@ -223,13 +229,13 @@ def sort_task_sessions(
 
 def find_best_continuous_position(
     slots: list[Slot],
-    session_minutes: int,
-    required_focus_level: str,
+    session: PlacementTaskSession,
+    task: PlacementTask,
     slot_unit_minutes: int,
 ) -> Optional[list[int]]:
     """세션을 그대로 넣을 수 있는 가장 좋은 연속 슬롯 인덱스를 찾는다."""
 
-    needed_count = session_minutes // slot_unit_minutes
+    needed_count = session.sessionMinutes // slot_unit_minutes
     best_indices: list[int] | None = None
     best_score: float | None = None
 
@@ -239,8 +245,13 @@ def find_best_continuous_position(
         if not _is_continuous_empty_candidate(candidate):
             continue
 
-        avg_focus = sum(slot.focus_score for slot in candidate) / needed_count
-        score = calculate_focus_fit_score(avg_focus, required_focus_level)
+        score = calculate_placement_score(
+            slots=slots,
+            candidate_indices=indices,
+            session=session,
+            task=task,
+            slot_unit_minutes=slot_unit_minutes,
+        )
         if best_score is None or score > best_score:
             best_score = score
             best_indices = indices
@@ -266,13 +277,17 @@ def place_session_continuously(
     session: PlacementTaskSession,
     task: PlacementTask,
     slot_unit_minutes: int,
+    max_continuous_minutes: int = MAX_CONTINUOUS_SCHEDULABLE_MINUTES,
 ) -> Optional[ScheduleBlock]:
     """권장 세션 길이를 유지해 연속 슬롯에 배치한다."""
 
+    if session.sessionMinutes > max_continuous_minutes:
+        return None
+
     indices = find_best_continuous_position(
         slots=slots,
-        session_minutes=session.sessionMinutes,
-        required_focus_level=session.requiredFocusLevel,
+        session=session,
+        task=task,
         slot_unit_minutes=slot_unit_minutes,
     )
     if indices is None:
@@ -302,7 +317,7 @@ def place_session_as_atomic_chunks(
     unscheduled_minutes = 0
 
     for _ in range(chunk_count):
-        index = _find_best_atomic_slot_index(slots, task.taskId, session.requiredFocusLevel)
+        index = _find_best_atomic_slot_index(slots, session, task, slot_unit_minutes)
         if index is None:
             unscheduled_minutes += slot_unit_minutes
             continue
@@ -323,8 +338,9 @@ def place_session_as_atomic_chunks(
 
 def _find_best_atomic_slot_index(
     slots: list[Slot],
-    task_id: int,
-    required_focus_level: str,
+    session: PlacementTaskSession,
+    task: PlacementTask,
+    slot_unit_minutes: int,
 ) -> int | None:
     best_index: int | None = None
     best_score: float | None = None
@@ -333,9 +349,13 @@ def _find_best_atomic_slot_index(
         if slot.occupied:
             continue
 
-        score = calculate_focus_fit_score(slot.focus_score, required_focus_level)
-        if _has_same_task_adjacent_slot(slots, index, task_id):
-            score += 5
+        score = calculate_placement_score(
+            slots=slots,
+            candidate_indices=[index],
+            session=session,
+            task=task,
+            slot_unit_minutes=slot_unit_minutes,
+        )
 
         if best_score is None or score > best_score:
             best_score = score
@@ -344,14 +364,125 @@ def _find_best_atomic_slot_index(
     return best_index
 
 
-def _has_same_task_adjacent_slot(slots: list[Slot], index: int, task_id: int) -> bool:
-    for neighbor_index in (index - 1, index + 1):
-        if neighbor_index < 0 or neighbor_index >= len(slots):
-            continue
-        neighbor = slots[neighbor_index]
-        if neighbor.occupied and neighbor.task_id == task_id:
-            return True
-    return False
+def calculate_placement_score(
+    slots: list[Slot],
+    candidate_indices: list[int],
+    session: PlacementTaskSession,
+    task: PlacementTask,
+    slot_unit_minutes: int,
+) -> float:
+    """오늘 마감/일반 태스크 정책을 분리한 통합 후보 점수."""
+
+    avg_focus = sum(slots[index].focus_score for index in candidate_indices) / len(candidate_indices)
+    focus_match_score = calculate_focus_fit_score(avg_focus, session.requiredFocusLevel)
+    block_fit_score = calculate_block_fit_score(slots, candidate_indices)
+    continuity_score = calculate_continuity_score(slots, candidate_indices, task.taskId)
+
+    if task.isDueToday:
+        early_score = calculate_early_placement_score(
+            candidate_start_index=candidate_indices[0],
+            total_slot_count=len(slots),
+        )
+        return (
+            0.45 * early_score
+            + 0.25 * focus_match_score
+            + 0.15 * block_fit_score
+            + 0.15 * continuity_score
+        )
+
+    return (
+        0.50 * focus_match_score
+        + 0.30 * block_fit_score
+        + 0.20 * continuity_score
+    )
+
+
+def calculate_early_placement_score(
+    candidate_start_index: int,
+    total_slot_count: int,
+) -> float:
+    """slots 배열 앞쪽 후보일수록 높은 점수를 준다."""
+
+    return 100 * (1 - candidate_start_index / max(1, total_slot_count - 1))
+
+
+def calculate_block_fit_score(slots: list[Slot], candidate_indices: list[int]) -> float:
+    """후보가 현재 빈 block을 얼마나 깔끔하게 쓰는지 0~100으로 점수화한다."""
+
+    candidate_slots = [slots[index] for index in candidate_indices]
+    block_index = candidate_slots[0].block_index
+    candidate_start = candidate_indices[0]
+    candidate_end = candidate_indices[-1]
+
+    left_edge = candidate_start
+    while (
+        left_edge - 1 >= 0
+        and slots[left_edge - 1].block_index == block_index
+        and not slots[left_edge - 1].occupied
+    ):
+        left_edge -= 1
+
+    right_edge = candidate_end
+    while (
+        right_edge + 1 < len(slots)
+        and slots[right_edge + 1].block_index == block_index
+        and not slots[right_edge + 1].occupied
+    ):
+        right_edge += 1
+
+    touches_left = candidate_start == left_edge
+    touches_right = candidate_end == right_edge
+    score = 70.0
+
+    if touches_left:
+        score += 15
+    if touches_right:
+        score += 15
+    if not touches_left and not touches_right:
+        score -= 20
+
+    left_remaining = candidate_start - left_edge
+    right_remaining = right_edge - candidate_end
+    if left_remaining == 1:
+        score -= 10
+    if right_remaining == 1:
+        score -= 10
+
+    return max(0.0, min(100.0, score))
+
+
+def calculate_continuity_score(
+    slots: list[Slot],
+    candidate_indices: list[int],
+    task_id: int,
+) -> float:
+    """같은 taskId의 기존 배치와 가까울수록 높은 점수를 준다."""
+
+    occupied_same_task_indices = [
+        index for index, slot in enumerate(slots) if slot.occupied and slot.task_id == task_id
+    ]
+    if not occupied_same_task_indices:
+        return 50.0
+
+    candidate_block_indices = {slots[index].block_index for index in candidate_indices}
+    min_distance = min(
+        min(abs(candidate_index - occupied_index) for candidate_index in candidate_indices)
+        for occupied_index in occupied_same_task_indices
+    )
+
+    if min_distance == 1:
+        return 100.0
+
+    same_block_distances = [
+        min(abs(candidate_index - occupied_index) for candidate_index in candidate_indices)
+        for occupied_index in occupied_same_task_indices
+        if slots[occupied_index].block_index in candidate_block_indices
+    ]
+    if same_block_distances:
+        same_block_distance = min(same_block_distances)
+        return max(70.0, 100.0 - same_block_distance * 10)
+
+    return max(30.0, 60.0 - min_distance * 5)
 
 
 def _occupy_slots(slots: list[Slot], indices: list[int], task_id: int) -> None:
@@ -360,7 +491,10 @@ def _occupy_slots(slots: list[Slot], indices: list[int], task_id: int) -> None:
         slots[index].task_id = task_id
 
 
-def merge_adjacent_blocks(blocks: list[ScheduleBlock]) -> list[ScheduleBlock]:
+def merge_adjacent_blocks(
+    blocks: list[ScheduleBlock],
+    max_continuous_minutes: int = MAX_CONTINUOUS_SCHEDULABLE_MINUTES,
+) -> list[ScheduleBlock]:
     """같은 taskId의 인접 블록을 하나의 블록으로 병합한다."""
 
     if not blocks:
@@ -375,7 +509,12 @@ def merge_adjacent_blocks(blocks: list[ScheduleBlock]) -> list[ScheduleBlock]:
             continue
 
         previous = merged[-1]
-        if previous.taskId == block.taskId and previous.end == block.start:
+        merged_duration = previous.durationMinutes + block.durationMinutes
+        if (
+            previous.taskId == block.taskId
+            and previous.end == block.start
+            and merged_duration <= max_continuous_minutes
+        ):
             start_minutes = time_to_minutes(previous.start)
             end_minutes = time_to_minutes(block.end)
             merged[-1] = ScheduleBlock(
@@ -390,10 +529,79 @@ def merge_adjacent_blocks(blocks: list[ScheduleBlock]) -> list[ScheduleBlock]:
     return merged
 
 
+def validate_auto_placement_response(
+    request: AutoPlacementRequest,
+    response: AutoPlacementResponse,
+    max_continuous_minutes: int = MAX_CONTINUOUS_SCHEDULABLE_MINUTES,
+) -> None:
+    """최종 배치 결과가 입력 가용 시간과 30분 단위 불변식을 지키는지 확인한다."""
+
+    schedulable_ranges = [
+        (time_to_minutes(block.start), time_to_minutes(block.end))
+        for block in request.schedulableTimeBlocks
+    ]
+    placed_ranges: list[tuple[int, int, int]] = []
+    scheduled_by_task: dict[int, int] = defaultdict(int)
+
+    for block in response.scheduleBlocks:
+        start = time_to_minutes(block.start)
+        end = time_to_minutes(block.end)
+        if start >= end:
+            raise ValueError("scheduleBlocks의 end는 start보다 커야 합니다.")
+        if block.durationMinutes != end - start:
+            raise ValueError("scheduleBlocks의 durationMinutes가 start/end와 일치하지 않습니다.")
+        if block.durationMinutes % request.slotUnitMinutes != 0:
+            raise ValueError("scheduleBlocks의 durationMinutes는 slotUnitMinutes의 배수여야 합니다.")
+        if block.durationMinutes > max_continuous_minutes:
+            raise ValueError("scheduleBlocks가 최대 연속 배치 시간을 초과했습니다.")
+        if not _is_range_covered_by_schedulable(start, end, schedulable_ranges):
+            raise ValueError("scheduleBlocks가 schedulableTimeBlocks 경계를 벗어났습니다.")
+
+        placed_ranges.append((start, end, block.taskId))
+        scheduled_by_task[block.taskId] += block.durationMinutes
+
+    placed_ranges.sort()
+    previous_end: int | None = None
+    for start, end, _ in placed_ranges:
+        if previous_end is not None and start < previous_end:
+            raise ValueError("scheduleBlocks끼리 겹칠 수 없습니다.")
+        previous_end = end
+
+    task_targets = {task.taskId: task.targetMinutes for task in request.tasks}
+    unscheduled_by_task = {item.taskId: item.unscheduledMinutes for item in response.unscheduledSessions}
+    for task_id, target_minutes in task_targets.items():
+        total = scheduled_by_task.get(task_id, 0) + unscheduled_by_task.get(task_id, 0)
+        if total > target_minutes:
+            raise ValueError(f"taskId={task_id}의 배치+미배치 시간이 targetMinutes를 초과했습니다.")
+
+
+def _is_range_covered_by_schedulable(
+    start: int,
+    end: int,
+    schedulable_ranges: list[tuple[int, int]],
+) -> bool:
+    """인접한 여러 schedulable block으로 이어진 응답 블록도 허용한다."""
+
+    cursor = start
+    for range_start, range_end in sorted(schedulable_ranges):
+        if range_end <= cursor:
+            continue
+        if range_start > cursor:
+            return False
+        cursor = max(cursor, range_end)
+        if cursor >= end:
+            return True
+    return False
+
+
 def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
     """분할된 세션을 배치 가능 슬롯에 자동 배치한다."""
 
     validate_auto_placement_request(request)
+    max_continuous_minutes = (
+        request.maxContinuousSchedulableMinutes
+        or MAX_CONTINUOUS_SCHEDULABLE_MINUTES
+    )
     slots = build_slots(
         schedulable_blocks=request.schedulableTimeBlocks,
         focus_time_slots=request.focusTimeSlots,
@@ -412,6 +620,7 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
             session=session,
             task=task,
             slot_unit_minutes=request.slotUnitMinutes,
+            max_continuous_minutes=max_continuous_minutes,
         )
         if block is not None:
             schedule_blocks.append(block)
@@ -427,14 +636,17 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
         if unscheduled_minutes:
             unscheduled_by_task[session.taskId] += unscheduled_minutes
 
-    merged_blocks = merge_adjacent_blocks(schedule_blocks)
+    merged_blocks = merge_adjacent_blocks(
+        schedule_blocks,
+        max_continuous_minutes=max_continuous_minutes,
+    )
     scheduled_minutes = sum(block.durationMinutes for block in merged_blocks)
     unscheduled_minutes = sum(unscheduled_by_task.values())
     total_schedulable_minutes = sum(
         block.durationMinutes for block in request.schedulableTimeBlocks
     )
 
-    return AutoPlacementResponse(
+    response = AutoPlacementResponse(
         scheduleBlocks=merged_blocks,
         unscheduledSessions=[
             UnscheduledSession(
@@ -451,3 +663,9 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
             slotUnitMinutes=request.slotUnitMinutes,
         ),
     )
+    validate_auto_placement_response(
+        request,
+        response,
+        max_continuous_minutes=max_continuous_minutes,
+    )
+    return response

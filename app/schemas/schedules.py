@@ -40,6 +40,7 @@ class PlacementTaskSession(BaseModel):
 
 class AutoPlacementRequest(BaseModel):
     slotUnitMinutes: int
+    maxContinuousSchedulableMinutes: int | None = None
     schedulableTimeBlocks: list[TimeBlock]
     focusTimeSlots: list[FocusTimeSlot] = Field(default_factory=list)
     tasks: list[PlacementTask]
