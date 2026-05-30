@@ -1,0 +1,334 @@
+# RealPlan AI Service — 코드 분석 가이드
+
+이 문서는 신규 합류자가 코드베이스를 빠르게 파악하기 위한 가이드다.
+API 명세는 [API_SPEC.md](./API_SPEC.md)를, 응답 래퍼 같은 공통 규약은
+프로젝트 루트 [CLAUDE.md](../CLAUDE.md)를 참고한다.
+
+---
+
+## 1. 개요
+
+RealPlan AI는 **계획 오류(planning fallacy)** 를 보정하는 학습 플래너의 AI 모듈이다.
+백엔드(Spring)가 모든 영속성·인증을 담당하고, 이 서비스는 **순수 계산 함수**만 제공한다.
+
+- 모델 학습 계수(userGlobal 등)는 **이쪽이 보관하지 않는다**.
+  Spring이 매 요청마다 주입하고, 응답으로 갱신된 값을 받아 다시 저장한다.
+- 따라서 모든 서비스 함수는 **무상태(stateless)** 이다.
+- HTTP 진입점은 `FastAPI`, 데이터 검증은 `Pydantic v2`, 응답은 공통 `ApiResponse` 래퍼.
+
+### 제공 엔드포인트
+
+| Method | Path                      | 역할                                      | 핵심 서비스                                  |
+|--------|---------------------------|-------------------------------------------|----------------------------------------------|
+| POST   | `/v1/classify`            | 태스크 유형 + splittable 분류 (LLM)       | `services/classifier/`                       |
+| POST   | `/v1/predict`             | 보정된 예상 소요시간 계산                 | `services/predictor.py` → `planning_model/`  |
+| POST   | `/v1/update`              | 완료 태스크 기반 사용자 계수 EMA 갱신     | `services/updater.py`  → `planning_model/`   |
+| POST   | `/v1/session/remaining`   | 세션 종료 시 잔여 소요시간 재계산         | `services/session_estimator.py`              |
+| POST   | `/v1/recommend`           | 가용시간 내 학습 조합 추천 (Knapsack)     | `services/scheduler/`                        |
+| GET    | `/health`                 | 헬스 체크                                 | (없음)                                       |
+
+---
+
+## 2. 디렉터리 구조
+
+```
+app/
+├── main.py                # FastAPI 엔트리, 라우터 등록
+├── core/config.py         # 환경 변수 로드 (.env)
+├── api/
+│   ├── response.py        # ApiResponse 공통 래퍼
+│   ├── exceptions.py      # 전역 예외 핸들러
+│   └── v1/
+│       ├── __init__.py    # v1_router에 각 모듈 라우터 묶음
+│       ├── classify.py    # 분류 핸들러
+│       ├── predict.py     # 예측 핸들러
+│       ├── update.py      # 계수 갱신 핸들러
+│       ├── session.py     # 세션 잔여시간 핸들러
+│       └── recommend.py   # 추천 핸들러
+├── schemas/               # Pydantic DTO (Spring DTO와 1:1 매핑)
+│   ├── classify.py
+│   ├── predict.py
+│   ├── update.py
+│   ├── session.py
+│   └── recommend.py
+└── services/              # 순수 계산 로직
+    ├── classifier/        # LLM 기반 태스크 유형 분류
+    ├── planning_model/    # 계획 오류 보정 모델 (predict/update)
+    │   ├── base.py            # PlanningStage ABC, CalculationError
+    │   ├── constants.py       # η, shrinkage, clamp, drop, threshold
+    │   ├── early_stage.py     # EARLY 단계 구현체
+    │   ├── main_stage.py      # MAIN_EFFECT 스텁
+    │   ├── interaction_stage.py # INTERACTION 스텁
+    │   └── router.py          # 단계 선택 + soft blending + default_router
+    ├── predictor.py       # /predict 진입점 (라우터 호출)
+    ├── updater.py         # /update 진입점 (라우터 호출)
+    ├── session_estimator.py  # 세션 잔여시간 재계산 (planning_model과 독립)
+    └── scheduler/         # Knapsack 기반 추천
+
+tests/services/
+├── test_early_stage.py        # EARLY predict/update + 라우터 + drop
+└── test_session_estimator.py  # 세션 잔여시간 재계산
+```
+
+---
+
+## 3. 요청 흐름
+
+### 3.1 `/v1/predict` (보정 예측)
+
+```
+HTTP POST /v1/predict
+  └─► api/v1/predict.py             # Pydantic 검증
+        └─► services/predictor.py
+              └─► planning_model/router.py  # completedCount 기반 단계 선택
+                    └─► early_stage.predict()  # (또는 MAIN/INTERACTION)
+                          → PredictResponse
+              ← PredictResponse
+        ← ApiResponse.ok(data=...)
+```
+
+### 3.2 `/v1/update` (계수 갱신)
+
+```
+HTTP POST /v1/update
+  └─► api/v1/update.py
+        └─► services/updater.py
+              └─► planning_model/router.py
+                    ├─► drop 판정 (ratio 가 [0.1, 8.0] 바깥?)
+                    │     → dropped=True 반환 (계수 변경 없음)
+                    └─► EMA 업데이트 → UpdateResponse
+```
+
+### 3.3 `/v1/session/remaining` (세션 잔여시간)
+
+```
+HTTP POST /v1/session/remaining
+  └─► api/v1/session.py
+        └─► services/session_estimator.estimate_remaining()
+              # planning_model과 무관. 사용자 계수 안 씀.
+              → SessionRemainingResponse
+```
+
+---
+
+## 4. 모듈별 설명
+
+### 4.1 `app/api/`
+
+- [`response.py`](../app/api/response.py): `ApiResponse[T]` 제네릭 래퍼. `ok(data, path)`와 `fail(code, message, path)` 두 팩토리. 모든 응답이 `{resultType, success, error, meta}` 형태로 통일된다.
+- [`exceptions.py`](../app/api/exceptions.py): 전역 핸들러. `RequestValidationError`/`HTTPException`/`Exception`을 잡아 위 래퍼로 변환.
+- [`v1/__init__.py`](../app/api/v1/__init__.py): 각 모듈 라우터를 `/v1` prefix 아래 묶는다. 새 엔드포인트 추가 시 여기에 `include_router` 한 줄 추가.
+
+### 4.2 `app/schemas/`
+
+각 엔드포인트의 Request/Response DTO. 명세는 [API_SPEC.md](./API_SPEC.md) 참조.
+
+- 필드명은 **camelCase** (Spring DTO와 1:1). 함수·변수는 snake_case와 분리.
+- 검증은 `Field(gt=..., le=...)` 등 Pydantic 선언으로. 서비스 레이어에서 중복 검증하지 않는다.
+
+### 4.3 `app/services/planning_model/`
+
+**계획 오류 보정 모델의 본체**. 사용자 누적 완료 수(`completedCount`)에 따라
+다른 회귀 전략을 쓰도록 설계했다.
+
+#### `base.py`
+
+```python
+class PlanningStage(ABC):
+    def predict(self, req: PredictRequest) -> PredictResponse: ...
+    def update(self, req: UpdateRequest) -> UpdateResponse: ...
+
+class CalculationError(Exception):  # code, message
+```
+
+새 단계를 추가하려면 이 ABC를 상속한다.
+
+#### `constants.py`
+
+| 상수                       | 값             | 의미                                    |
+|----------------------------|----------------|-----------------------------------------|
+| `ETA_GLOBAL`               | 0.10           | userGlobal EMA 학습률                   |
+| `ETA_TYPE`                 | 0.15           | userTypeResidual EMA 학습률             |
+| `TYPE_SHRINKAGE_N`         | 10             | r_type = n/(n+10)                       |
+| `SYSTEM_SHRINKAGE_N`       | 50             | 시스템 effect shrinkage                 |
+| `CLAMP_MIN`, `CLAMP_MAX`   | log(1/3), log(4) | logRatio clamp 범위                   |
+| `DROP_RATIO_MIN`, `DROP_RATIO_MAX` | 0.1, 8.0 | clamp 바깥 극단치를 학습에서 제외       |
+| `EARLY_THRESHOLD`          | 50             | EARLY → MAIN 전환 기준                  |
+| `MAIN_THRESHOLD`           | 200            | MAIN → INTERACTION 전환 기준            |
+| `BLEND_TRANSITION_WIDTH`   | 10             | sigmoid blending 폭                     |
+
+#### `early_stage.py` (현재 유일한 구현체)
+
+EARLY 단계 (completed < 50)는 회귀 없이 EMA 보정만 사용한다.
+
+**predict()**
+
+```
+logCorrection = userGlobal
+              + systemTypeEffect[taskType]
+              + systemDifficultyEffect[difficulty]
+              + r_type × userTypeResidual[taskType]
+
+r_type = typeCount / (typeCount + 10)
+predictedMinutes = estimatedMinutes × exp(logCorrection)
+```
+
+신규 사용자(`userGlobal=None`)는 `systemGlobalPrior`로 대체.
+
+**update()**
+
+진입 직후 순서:
+1. `estimatedMinutes`/`actualMinutes` > 0 검증 (실패 시 `CalculationError`)
+2. **Drop 판정** — `ratio = actual/estimated`가 `[0.1, 8.0]` 바깥이면
+   계수 변경 없이 `dropped=True, dropReason=...`로 조기 반환
+3. `logRatio = log(ratio)`, `[log(1/3), log(4)]`로 clamp
+4. `userGlobal` EMA 업데이트 (η = 0.10)
+5. `userTypeResidual` EMA 업데이트 (η = 0.15)
+6. `typeCount[taskType] += 1`
+
+Drop과 Clamp의 관계:
+
+```
+Drop    Clamp 적용 구간             Drop
+ │      │◄─────────────────────►│   │
+0.1   1/3                       4.0 8.0
+```
+
+[1/3, 4.0]은 그대로 학습, [0.1, 1/3)·(4.0, 8.0]은 clamp 후 학습, 바깥은 Drop.
+
+#### `main_stage.py` / `interaction_stage.py` (스텁)
+
+스텁은 `NotImplementedError`만 던진다. `router._predict_with_fallback`이
+이 예외를 잡아 직전 단계로 폴백한다.
+
+구현 시 주의:
+- `update()` 진입 직후에 **Drop 판정을 동일 위치에 추가**할 것 (TODO 주석 참고)
+- predict는 회귀 결과 + 계수 보정을 합쳐 `logCorrection`을 만든다
+- `stage` 라벨을 `STAGE_MAIN` / `STAGE_INTERACTION`으로 설정
+
+#### `router.py`
+
+`PlanningRouter`는 단계 선택과 soft blending을 담당한다.
+
+| completed   | 동작                                |
+|-------------|-------------------------------------|
+| < 50        | EARLY only                          |
+| 50 ~ 59     | EARLY + MAIN soft blend             |
+| 60 ~ 199    | MAIN only                           |
+| 200 ~ 209   | MAIN + INTERACTION soft blend       |
+| ≥ 210       | INTERACTION only                    |
+
+`sigmoid_weight(completed, threshold, width=10)`로 부드럽게 전환한다.
+Blending은 **최종값(predictedMinutes) 공간**에서 수행 (logCorrection이 아님).
+
+스텁 폴백:
+- blending 구간에서 한쪽이 `NotImplementedError`면 다른 쪽 단독 결과로 폴백, 경고 로그
+- update는 blending 없이 현재 단계만 실행하고, 스텁이면 직전 단계로 폴백
+
+`default_router = PlanningRouter()` — 모듈 레벨 싱글톤. 무상태이므로 매 요청마다 생성하지 않는다.
+
+### 4.4 `app/services/session_estimator.py`
+
+세션 단위 잔여시간 재계산. **`planning_model`과 독립** — 사용자 학습 계수를
+건드리지 않고, 진행률·집중도만으로 잔여시간을 보정한다.
+
+상수:
+- `FOCUS_WEIGHT_MAP`: `{DISTRACTED: 0.8, NORMAL: 1.0, FOCUSED: 1.2, FLOW: 1.5}` (보통 집중 기준 생산성 비율)
+- `BLENDING_WEIGHT_BASE = 0.4`
+
+처리 순서:
+
+```
+Step 1. progressBasedRemaining = elapsed × (1/progress - 1)
+Step 2. focusAdjustedRemaining = progressBasedRemaining × focusWeight
+        # 현재 집중도 기준 잔여시간을 보통 집중 기준으로 환산
+Step 3. focusAdjustedTotal = elapsed + focusAdjustedRemaining
+        blendingWeight = 0.4 × progress
+        updatedAiTotal = blendingWeight × focusAdjustedTotal
+                       + (1 - blendingWeight) × previousAiTotalMinutes
+Step 4. rawRemaining = updatedAiTotal - elapsed
+        if rawRemaining ≤ 0 and progress < 1.0:
+            finalRemaining = 30.0       # 미완료 태스크의 스케줄링용 최소 보장
+        else:
+            finalRemaining = max(0.0, rawRemaining)
+        updatedAiTotal = elapsed + finalRemaining
+```
+
+설계 포인트:
+- 이미 지난 `elapsedMinutes`는 사실이므로 건드리지 않고 잔여시간만 보정
+- `blendingWeight ∝ progress`: 진행률이 낮을수록 외삽 신뢰도가 낮으므로 `previousAiTotal`을 더 신뢰
+- `progress < 1.0` AND `rawRemaining ≤ 0`: 미완료인데 예측이 음수면 30분 fallback
+- `progress = 1.0` AND `rawRemaining ≤ 0`: 완료된 태스크는 그냥 0으로 clamp
+
+### 4.5 `app/services/classifier/`
+
+LLM(OpenAI) 기반 태스크 유형 + splittable 분류. EARLY/predict와는 독립.
+구조는 `core.py`, `prompts.py`, `personalization.py`, `types.py`, `constants.py`로 분리되어 있다. 자세한 내용은 해당 파일 docstring 참고.
+
+### 4.6 `app/services/scheduler/`
+
+`/recommend`용 Knapsack 추천. 본 가이드 범위 밖.
+
+---
+
+## 5. 자주 하는 변경
+
+### "새 학습 단계를 추가하고 싶다"
+
+1. `planning_model/`에 `<name>_stage.py` 생성, `PlanningStage` 상속
+2. `predict`/`update` 구현. `update` 최상단에 **Drop 판정** 추가
+3. `constants.py`에 임계값·라벨 상수 추가
+4. `router.py`에 단계 선택 분기 + (선택) blending 추가
+5. `tests/services/test_<name>_stage.py` 작성
+
+### "예측 수식에 새 효과를 추가하고 싶다"
+
+- 입력이 필요하면 `schemas/predict.py`의 `PredictRequest`에 필드 추가 (Spring과 동기화)
+- `early_stage.predict()`에서 `logCorrection`에 항을 더한다
+- 상수는 `planning_model/constants.py`에
+
+### "Drop 임계값을 바꾸고 싶다"
+
+[`planning_model/constants.py`](../app/services/planning_model/constants.py)의
+`DROP_RATIO_MIN`/`DROP_RATIO_MAX` 한 곳만 수정. EARLY는 자동 반영.
+MAIN/INTERACTION 구현체에도 Drop을 추가했다면 같이 적용된다.
+
+### "새 엔드포인트를 추가하고 싶다"
+
+1. `schemas/<name>.py`에 Request/Response 정의
+2. `services/<name>.py` 또는 `services/<name>/` 패키지에 순수 함수 작성
+3. `api/v1/<name>.py`에 라우터 핸들러
+4. `api/v1/__init__.py`에 `include_router(<name>.router)` 한 줄 추가
+5. `tests/services/test_<name>.py`
+6. `docs/API_SPEC.md`에 요청·응답 예시 추가
+
+### "에러 응답을 추가하고 싶다"
+
+서비스에서 `CalculationError(code, message)`를 던지면 API 핸들러가
+400으로 변환한다. 추가 핸들러 작성 불필요.
+
+---
+
+## 6. 테스트
+
+```
+uv run python -m pytest tests/services/ -v
+```
+
+- `test_early_stage.py`: EARLY predict/update + 라우터 + soft blending + drop (20+ 케이스)
+- `test_session_estimator.py`: 세션 잔여시간 재계산 (10+ 케이스)
+
+새 모듈을 추가하면 `tests/services/test_<name>.py`를 작성한다.
+유효성 검사는 `ValidationError` (Pydantic), 도메인 오류는 `CalculationError`로 검증.
+
+---
+
+## 7. 확장 시 주의
+
+- **계수를 서버에 저장하지 않는다.** 모든 사용자 상태는 요청·응답으로 흐른다.
+  서버 메모리에 누적되는 상태가 생기면 horizontal scaling에서 깨진다.
+- **`planning_model`과 `session_estimator`는 분리한다.** 전자는 학습 계수,
+  후자는 세션 단위 보정으로 책임이 다르다.
+- **API 필드명은 camelCase, 내부 변수는 snake_case** ([CLAUDE.md](../CLAUDE.md) 참조).
+- **응답은 항상 `ApiResponse.ok` / `fail`** 로 감싼다. 직접 dict 반환 금지.
+- **새 종속 패키지는 `pyproject.toml`에 추가**, `uv add <pkg>`로 lock 갱신.
