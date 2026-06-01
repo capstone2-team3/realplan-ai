@@ -233,7 +233,7 @@ def find_best_continuous_position(
     task: PlacementTask,
     slot_unit_minutes: int,
 ) -> Optional[list[int]]:
-    """마감 태스크는 가장 이른 후보, 일반 태스크는 focusScore 최적 후보를 찾는다."""
+    """오늘 마감 태스크는 가장 이른 후보, 일반 태스크는 focusScore 최적 후보를 찾는다."""
 
     if task.isDueToday:
         return find_earliest_continuous_position(
