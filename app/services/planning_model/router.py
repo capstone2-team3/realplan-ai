@@ -26,12 +26,18 @@ logger = logging.getLogger(__name__)
 
 
 def sigmoid_weight(completed: int, threshold: int, width: int = BLEND_TRANSITION_WIDTH) -> float:
-    """threshold 기준으로 다음 단계 weight를 0→1로 부드럽게 전환."""
+    """threshold 기준으로 다음 단계 weight를 0→1로 부드럽게 전환.
+
+    완료 개수가 경계에 걸린 사용자가 예측값 급변을 겪지 않도록 단계 사이를 완만히 섞는다.
+    """
     return 1 / (1 + math.exp(-(completed - threshold) / width))
 
 
 class PlanningRouter:
-    """단계 선택과 blending을 담당하는 진입점."""
+    """완료 기록 수에 맞는 예측/업데이트 전략을 고르는 진입점.
+
+    데이터가 적을 때는 단순 EMA 계수, 충분해지면 회귀 모델로 넘어가도록 설계되어 있다.
+    """
 
     def __init__(self) -> None:
         self.early = EarlyStage()
@@ -41,13 +47,15 @@ class PlanningRouter:
     # --- predict --------------------------------------------------------
 
     def predict(self, req: PredictRequest) -> PredictResponse:
+        """completedCount 구간에 따라 예측 단계를 고르고 전환 구간에서는 soft blending한다."""
+
         completed = req.completedCount
 
-        # 1) EARLY only: < 50
+        # 1) EARLY only: 완료 기록이 적어 개인 EMA와 시스템 prior만 사용한다.
         if completed < EARLY_THRESHOLD:
             return self.early.predict(req)
 
-        # 2) EARLY + MAIN soft blending: 50 ~ 59
+        # 2) EARLY + MAIN soft blending: 회귀 모델 전환 초반의 예측 급변을 줄인다.
         if completed < EARLY_THRESHOLD + BLEND_TRANSITION_WIDTH:
             return self._blend_predict(
                 req,
@@ -58,7 +66,7 @@ class PlanningRouter:
                 threshold=EARLY_THRESHOLD,
             )
 
-        # 3) MAIN only: 60 ~ 199
+        # 3) MAIN only: 충분한 개인 기록이 쌓이면 main-effect 모델을 우선한다.
         if completed < MAIN_THRESHOLD:
             return self._predict_with_fallback(
                 req,
@@ -68,7 +76,7 @@ class PlanningRouter:
                 primary_label=STAGE_MAIN,
             )
 
-        # 4) MAIN + INTERACTION soft blending: 200 ~ 209
+        # 4) MAIN + INTERACTION soft blending: 교호작용 모델로 넘어가는 완충 구간이다.
         if completed < MAIN_THRESHOLD + BLEND_TRANSITION_WIDTH:
             return self._blend_predict(
                 req,
@@ -79,7 +87,7 @@ class PlanningRouter:
                 threshold=MAIN_THRESHOLD,
             )
 
-        # 5) INTERACTION only: >= 210
+        # 5) INTERACTION only: 데이터가 충분해 태스크 유형과 난이도 조합까지 반영한다.
         return self._predict_with_fallback(
             req,
             primary=self.interaction,

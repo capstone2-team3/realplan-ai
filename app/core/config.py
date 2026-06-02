@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # 환경변수에서 OpenAI API Key 가져옴. 없으면 None 반환.
+# OpenAI 호출 모듈이 여러 곳에 있어, 앱 시작 시점에 키 누락을 빠르게 드러낸다.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 
 if OPENAI_API_KEY is None:

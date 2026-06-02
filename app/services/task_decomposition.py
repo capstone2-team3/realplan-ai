@@ -170,7 +170,10 @@ TASK_DECOMPOSITION_JSON_SCHEMA = {
 
 
 def build_openai_messages(request: TaskDecompositionRequest) -> list[dict[str, str]]:
-    """OpenAI에 전달할 system/user 메시지를 구성한다."""
+    """OpenAI에 전달할 system/user 메시지를 구성한다.
+
+    request body를 그대로 JSON으로 보내 Spring DTO와 Python 계산 입력의 의미가 어긋나지 않게 한다.
+    """
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -213,7 +216,10 @@ async def call_openai_decomposition(
     client: Any | None = None,
     model: str | None = None,
 ) -> TaskDecompositionResponse:
-    """Structured Outputs로 태스크 분할 JSON을 요청한다."""
+    """Structured Outputs로 태스크 분할 JSON을 요청한다.
+
+    OpenAI는 세션 길이와 요구 집중도만 만들고, 실제 시간 배치는 별도 스케줄러가 담당한다.
+    """
 
     if client is None:
         from openai import AsyncOpenAI
@@ -234,6 +240,7 @@ async def call_openai_decomposition(
         temperature=0.0,
     )
 
+    # Structured Outputs를 쓰더라도 운영 안정성을 위해 아래에서 Pydantic 검증을 한 번 더 수행한다.
     raw = response.choices[0].message.content
     if not raw:
         raise ValueError("OpenAI 응답이 비어 있습니다.")
@@ -277,7 +284,10 @@ def validate_decomposition_response(
     request: TaskDecompositionRequest,
     response: TaskDecompositionResponse,
 ) -> None:
-    """OpenAI가 만든 분할 결과를 Python 코드로 다시 검증한다."""
+    """OpenAI가 만든 분할 결과를 Python 코드로 다시 검증한다.
+
+    LLM 출력이 스키마를 통과해도 총합/연속 배치 한도 같은 도메인 규칙은 여기서 보장한다.
+    """
 
     if not response.taskSessions:
         raise ValueError("taskSessions는 비어 있을 수 없습니다.")
@@ -315,7 +325,10 @@ def validate_decomposition_response(
 
 
 def _fallback_session_minutes(target_minutes: int, max_continuous_minutes: int) -> list[int]:
-    """MVP 안정성을 위해 60분 중심으로 기본 분할한다."""
+    """MVP 안정성을 위해 60분 중심으로 기본 분할한다.
+
+    OpenAI가 실패해도 자동 배치가 계속 동작하도록 예측 가능한 세션 길이를 만든다.
+    """
 
     if max_continuous_minutes == 30:
         return [30] * (target_minutes // 30)
@@ -342,7 +355,10 @@ def _fallback_session_minutes(target_minutes: int, max_continuous_minutes: int) 
 
 
 def fallback_decompose(request: TaskDecompositionRequest) -> TaskDecompositionResponse:
-    """OpenAI 실패 또는 검증 실패 시 사용하는 기본 분할."""
+    """OpenAI 실패 또는 검증 실패 시 사용하는 기본 분할.
+
+    난이도 기반 집중도만 사용하므로 품질은 단순하지만, API 응답 불능 상태를 피할 수 있다.
+    """
 
     sessions: list[TaskSession] = []
     for task in request.tasks:
@@ -375,6 +391,7 @@ async def decompose_tasks(request: TaskDecompositionRequest) -> TaskDecompositio
             validate_decomposition_response(request, response)
             return response
         except Exception as exc:
+            # LLM 호출/파싱/도메인 검증 실패를 같은 실패로 보고 한 번 더 시도한다.
             logger.warning("태스크 분할 OpenAI 시도 %s회 실패: %s", attempt, exc, exc_info=True)
 
     logger.warning("OpenAI 태스크 분할 검증/호출 실패로 fallback 분할을 사용합니다.")

@@ -33,6 +33,11 @@ MAX_CONTINUOUS_SCHEDULABLE_MINUTES = 90
 
 @dataclass
 class Slot:
+    """배치 가능 시간을 30분 단위로 쪼갠 내부 상태.
+
+    응답 DTO가 아니라 배치 중 점유 여부와 집중도 점수를 추적하기 위한 작업용 모델이다.
+    """
+
     start_minutes: int
     end_minutes: int
     focus_score: int
@@ -65,7 +70,10 @@ def minutes_to_time(value: int) -> str:
 
 
 def validate_auto_placement_request(request: AutoPlacementRequest) -> None:
-    """자동 배치 입력의 시간/세션 불변식을 검증한다."""
+    """자동 배치 입력의 시간/세션 불변식을 검증한다.
+
+    Java 백엔드가 만든 후보라도, Python 계산 전후의 책임 경계를 명확히 하기 위해 다시 검증한다.
+    """
 
     slot_unit = request.slotUnitMinutes
     if slot_unit != 30:
@@ -115,6 +123,8 @@ def validate_auto_placement_request(request: AutoPlacementRequest) -> None:
 
 
 def _validate_schedulable_blocks(blocks: list[TimeBlock], slot_unit_minutes: int) -> None:
+    """가용 시간 블록이 30분 단위이고 서로 겹치지 않는지 확인한다."""
+
     parsed_blocks: list[tuple[int, int, int]] = []
 
     for index, block in enumerate(blocks):
@@ -190,6 +200,8 @@ def _focus_score_for_slot(
     slot_start_minutes: int,
     focus_slots: list[tuple[int, int, int]],
 ) -> int:
+    """해당 슬롯에 매칭되는 집중도 점수를 찾고, 입력이 없으면 중립값 50을 사용한다."""
+
     for start, end, focus_score in focus_slots:
         if start <= slot_start_minutes < end:
             return focus_score
@@ -197,7 +209,10 @@ def _focus_score_for_slot(
 
 
 def calculate_focus_fit_score(avg_focus_score: float, required_focus_level: str) -> float:
-    """요구 집중도와 슬롯 집중도 간 적합도를 계산한다."""
+    """요구 집중도와 슬롯 집중도 간 적합도를 계산한다.
+
+    HIGH는 높은 집중도 슬롯을 선호하고, LOW는 가벼운 작업을 낮은 집중도 구간에 배치하려고 반대로 본다.
+    """
 
     if required_focus_level == "HIGH":
         return avg_focus_score
@@ -214,7 +229,10 @@ def sort_task_sessions(
     sessions: list[PlacementTaskSession],
     task_map: dict[int, PlacementTask],
 ) -> list[PlacementTaskSession]:
-    """마감, 추천점수, 집중도, 세션 길이 순으로 세션을 정렬한다."""
+    """마감, 추천점수, 집중도, 세션 길이 순으로 세션을 정렬한다.
+
+    슬롯이 부족할 때 오늘 마감 태스크가 먼저 자리를 가져가도록 배치 순서를 고정한다.
+    """
 
     return sorted(
         sessions,
@@ -292,6 +310,8 @@ def find_best_focus_matched_continuous_position(
 
 
 def _is_continuous_empty_candidate(candidate: list[Slot]) -> bool:
+    """후보 슬롯들이 비어 있고, 같은 가용 블록 안에서 끊기지 않고 이어지는지 확인한다."""
+
     if not candidate or any(slot.occupied for slot in candidate):
         return False
 
@@ -342,7 +362,10 @@ def place_session_as_atomic_chunks(
     task: PlacementTask,
     slot_unit_minutes: int,
 ) -> tuple[list[ScheduleBlock], int]:
-    """연속 배치 실패 시 30분 단위 chunk로 쪼개어 배치한다."""
+    """연속 배치 실패 시 30분 단위 chunk로 쪼개어 배치한다.
+
+    세션 의도는 일부 잃지만, 빈 시간이 흩어져 있어도 가능한 만큼 배치하기 위한 fallback이다.
+    """
 
     blocks: list[ScheduleBlock] = []
     chunk_count = session.sessionMinutes // slot_unit_minutes
@@ -374,6 +397,8 @@ def _find_best_atomic_slot_index(
     task: PlacementTask,
     slot_unit_minutes: int,
 ) -> int | None:
+    """오늘 마감은 시간 우선, 일반 태스크는 집중도 매칭 우선으로 단일 슬롯을 고른다."""
+
     if task.isDueToday:
         return _find_earliest_empty_slot_index(slots)
 
@@ -412,6 +437,8 @@ def _find_best_focus_matched_atomic_slot_index(
 
 
 def _occupy_slots(slots: list[Slot], indices: list[int], task_id: int) -> None:
+    """선택한 슬롯을 점유 처리해 이후 세션이 같은 시간을 다시 쓰지 못하게 한다."""
+
     for index in indices:
         slots[index].occupied = True
         slots[index].task_id = task_id
@@ -521,7 +548,10 @@ def _is_range_covered_by_schedulable(
 
 
 def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
-    """분할된 세션을 배치 가능 슬롯에 자동 배치한다."""
+    """분할된 세션을 배치 가능 슬롯에 자동 배치한다.
+
+    입력 request만 사용해 계산하며, DB 저장이나 기존 일정 조회는 Spring 백엔드 책임이다.
+    """
 
     validate_auto_placement_request(request)
     max_continuous_minutes = (
@@ -569,6 +599,7 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
         schedule_blocks,
         max_continuous_minutes=max_continuous_minutes,
     )
+    # atomic fallback으로 생긴 인접 30분 블록은 응답 가독성을 위해 다시 묶는다.
     scheduled_minutes = sum(block.durationMinutes for block in merged_blocks)
     unscheduled_minutes = sum(unscheduled_by_task.values())
     total_schedulable_minutes = sum(

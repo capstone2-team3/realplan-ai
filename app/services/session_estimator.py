@@ -23,6 +23,11 @@ BLENDING_WEIGHT_BASE = 0.4
 
 
 def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse:
+    """세션 중간/종료 입력을 바탕으로 다음에 사용할 AI 총 소요시간을 재계산한다.
+
+    사용자별 계수 학습은 하지 않고, 현재 세션의 진행률과 집중도만 반영하는 가벼운 업데이트다.
+    """
+
     if req.elapsedMinutes <= 0:
         raise CalculationError(
             "INVALID_INPUT",

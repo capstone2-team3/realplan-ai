@@ -38,7 +38,10 @@ class NoOpPersonalization:
 
 
 class KeywordPersonalization:
-    """과거 Task와 단어 겹침이 일정 비율 이상이면 그 유형을 따라감 (Jaccard)."""
+    """과거 Task와 단어 겹침이 일정 비율 이상이면 그 유형을 따라감 (Jaccard).
+
+    같은 사용자의 비슷한 태스크가 매번 다른 유형으로 분류되어 계수가 흔들리는 일을 줄인다.
+    """
 
     def __init__(self, overlap_threshold: float = 0.5):
         self.threshold = overlap_threshold

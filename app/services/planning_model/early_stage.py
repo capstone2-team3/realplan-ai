@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 class EarlyStage(PlanningStage):
-    """completed < 50 구간 전용 보정기."""
+    """completed < 50 구간 전용 보정기.
+
+    사용자 데이터가 적은 초반에는 과적합을 피하려고 시스템 prior와 EMA 업데이트만 사용한다.
+    """
 
     def predict(self, req: PredictRequest) -> PredictResponse:
         if req.estimatedMinutes <= 0:
@@ -36,16 +39,16 @@ class EarlyStage(PlanningStage):
                 "estimatedMinutes는 0보다 커야 합니다.",
             )
 
-        # 1) 사용자 global → 없으면 system prior로 대체
+        # 1) 사용자 global은 사용자의 전반적인 과소/과대 예측 성향이며, 없으면 system prior로 대체한다.
         user_global = (
             req.userGlobal if req.userGlobal is not None else req.systemGlobalPrior
         )
 
-        # 2) 시스템 effect (없는 키는 0)
+        # 2) 시스템 effect는 전체 사용자 통계에서 얻은 태스크 유형/난이도별 평균 보정값이다.
         system_type_effect = req.systemTypeEffect.get(req.taskType, 0.0)
         system_difficulty_effect = req.systemDifficultyEffect.get(req.difficulty, 0.0)
 
-        # 3) 사용자 type residual + shrinkage 가중치
+        # 3) 사용자 type residual은 특정 태스크 유형에서만 반복되는 개인 편차다.
         user_type_residual = 0.0
         if req.userTypeResidual is not None:
             user_type_residual = req.userTypeResidual.get(req.taskType, 0.0)
@@ -53,9 +56,10 @@ class EarlyStage(PlanningStage):
         type_count = 0
         if req.typeCount is not None:
             type_count = req.typeCount.get(req.taskType, 0)
+        # 기록이 적은 유형은 residual을 덜 믿고, 많이 쌓일수록 온전히 반영한다.
         r_type = type_count / (type_count + TYPE_SHRINKAGE_N)
 
-        # 4) logCorrection 조립
+        # 4) logCorrection은 비율 보정값이라 exp를 씌워 사용자의 입력 시간에 곱한다.
         log_correction = (
             user_global
             + system_type_effect
@@ -104,13 +108,13 @@ class EarlyStage(PlanningStage):
         log_ratio = math.log(ratio)
         clamped_log_ratio = max(CLAMP_MIN, min(CLAMP_MAX, log_ratio))
 
-        # userGlobal EMA 업데이트
+        # userGlobal EMA 업데이트: 이번 관측치를 천천히 섞어 전반적인 계획 오류 성향을 학습한다.
         user_global_old = (
             req.userGlobal if req.userGlobal is not None else req.systemGlobalPrior
         )
         user_global_new = (1 - ETA_GLOBAL) * user_global_old + ETA_GLOBAL * clamped_log_ratio
 
-        # userTypeResidual EMA 업데이트
+        # userTypeResidual EMA 업데이트: global/system effect로 설명되지 않는 유형별 잔차를 학습한다.
         system_type_effect = req.systemTypeEffect.get(req.taskType, 0.0)
         system_difficulty_effect = req.systemDifficultyEffect.get(req.difficulty, 0.0)
         residual_target = (
@@ -125,7 +129,7 @@ class EarlyStage(PlanningStage):
         residual_new = (1 - ETA_TYPE) * residual_old + ETA_TYPE * residual_target
         residual_map[req.taskType] = residual_new
 
-        # typeCount 증가
+        # typeCount는 다음 예측에서 shrinkage 강도를 정하는 사용자별 학습 데이터다.
         type_count_map: dict[str, int] = dict(req.typeCount or {})
         type_count_map[req.taskType] = type_count_map.get(req.taskType, 0) + 1
 

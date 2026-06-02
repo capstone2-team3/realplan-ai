@@ -19,12 +19,16 @@ class TimeBlock(BaseModel):
 
 
 class FocusTimeSlot(BaseModel):
+    """사용자 집중도 예측 구간. 자동 배치가 집중도 매칭 점수로 사용한다."""
+
     start: str
     end: str
     focusScore: int
 
 
 class PlacementTask(BaseModel):
+    """배치 우선순위 계산에 필요한 태스크 요약 정보."""
+
     taskId: int
     isDueToday: bool
     recommendScore: float
@@ -33,12 +37,16 @@ class PlacementTask(BaseModel):
 
 
 class PlacementTaskSession(BaseModel):
+    """태스크 분할 결과 한 조각. 실제 시간표 위치는 아직 정해지지 않은 상태다."""
+
     taskId: int
     sessionMinutes: int
     requiredFocusLevel: RequiredFocusLevel
 
 
 class AutoPlacementRequest(BaseModel):
+    """Spring이 계산한 가용 시간과 Python이 계산한 세션 분할 결과를 함께 받는다."""
+
     slotUnitMinutes: int
     maxContinuousSchedulableMinutes: int | None = None
     schedulableTimeBlocks: list[TimeBlock]

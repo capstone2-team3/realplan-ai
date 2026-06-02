@@ -12,6 +12,11 @@ NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."
 
 @dataclass(frozen=True)
 class CandidateTask:
+    """추천 후보 태스크의 계산용 모델.
+
+    Spring에서 이미 DB 값을 모아 보낸다고 보고, Python은 남은 시간과 점수 계산만 담당한다.
+    """
+
     taskId: int
     title: str
     dueDate: date | datetime | None = None
@@ -65,6 +70,8 @@ class RecommendOutput:
 
 @dataclass(frozen=True)
 class _ScoredTask:
+    """정렬과 응답 생성을 위해 후보 태스크에 점수와 라벨을 붙인 내부 모델."""
+
     task: CandidateTask
     due_date: date | None
     remaining_minutes: int
@@ -77,7 +84,10 @@ class _ScoredTask:
 
 
 def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
-    """미완료 태스크 중 targetDate에 수행할 태스크를 최대 4개 추천한다."""
+    """미완료 태스크 중 targetDate에 수행할 태스크를 최대 4개 추천한다.
+
+    오늘 마감 태스크를 먼저 채우고, 남은 시간에 일반 태스크를 점수 순으로 배정한다.
+    """
 
     available_minutes = calculate_available_minutes(inp.availableStart, inp.availableEnd)
     if available_minutes <= 0:
@@ -88,6 +98,7 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
     due_today = [task for task in candidates if task.is_due_today]
     general = [task for task in candidates if not task.is_due_today]
+    # 마감 태스크와 일반 태스크를 분리해, 추천 점수가 같아도 오늘 마감이 밀리지 않게 한다.
     due_today.sort(key=_candidate_sort_key)
     general.sort(key=_candidate_sort_key)
 
@@ -133,6 +144,8 @@ def calculate_available_minutes(start: time, end: time) -> int:
 
 
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:
+    """최종 예상 시간에서 실제 수행 시간과 이미 잡힌 일정 시간을 빼 남은 시간을 구한다."""
+
     final_estimated_minutes = _resolve_final_estimated_minutes(task)
     if final_estimated_minutes is None:
         return None
@@ -152,6 +165,8 @@ def calculate_remaining_minutes(task: CandidateTask) -> int | None:
 
 
 def deadline_score(due_date: date | datetime | None, target_date: date) -> int:
+    """마감일이 가까울수록 높은 점수를 주고, 마감이 없으면 낮은 기본 점수만 부여한다."""
+
     due_day = _to_date(due_date)
     if due_day is None:
         return 5
@@ -173,6 +188,8 @@ def deadline_score(due_date: date | datetime | None, target_date: date) -> int:
 
 
 def priority_score(priority: str | None) -> int:
+    """백엔드 우선순위 문자열을 추천 계산용 점수로 변환한다."""
+
     return {
         "HIGH": 100,
         "MEDIUM": 60,
@@ -181,6 +198,8 @@ def priority_score(priority: str | None) -> int:
 
 
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
+    """추천 대상이 아닌 태스크를 걸러내고 마감/중요도 기반 추천 점수를 만든다."""
+
     if _is_excluded_status(task.status) or task.isDeleted or task.isArchived:
         return None
 
@@ -192,6 +211,7 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
     is_due_today = due_day is not None and due_day <= target_date
     task_deadline_score = deadline_score(due_day, target_date)
     task_priority_score = priority_score(task.priority)
+    # 추천 점수는 마감 압박을 더 크게 보고, 중요도는 보조 기준으로 반영한다.
     recommend_score = round(
         0.6 * task_deadline_score + 0.4 * task_priority_score,
         1,
@@ -211,6 +231,8 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
 
 
 def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
+    """사용자 보정값을 최우선으로 보고, 없으면 AI 예측값까지 순서대로 fallback한다."""
+
     for minutes in (
         task.finalEstimatedMinutes,
         task.userAdjustedEstimatedMinutes,
@@ -222,10 +244,14 @@ def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
 
 
 def _is_excluded_status(status: str | None) -> bool:
+    """완료/삭제/보관 상태는 추천 후보에서 제외한다."""
+
     return (status or "").lower() in {"completed", "done", "deleted", "archived"}
 
 
 def _candidate_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, int]:
+    """후보 선별 단계의 정렬 기준. 동점이면 마감일, 중요도, 짧은 작업 순으로 안정화한다."""
+
     return (
         -candidate.recommend_score,
         candidate.due_date or date.max,
@@ -236,6 +262,8 @@ def _candidate_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, 
 
 
 def _selected_sort_key(candidate: _ScoredTask) -> tuple[float, bool, date, int, int, int]:
+    """응답 순위 정렬 기준. 선택 이후에도 오늘 마감 태스크가 위에 보이도록 정렬한다."""
+
     return (
         -candidate.recommend_score,
         not candidate.is_due_today,

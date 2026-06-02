@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RecommendCandidateDTO(BaseModel):
+    """Spring이 선별해 넘긴 추천 후보 한 건.
+
+    Python은 DB를 조회하지 않으므로 남은 시간 계산에 필요한 누적 시간 값도 함께 받는다.
+    """
+
     taskId: int
     title: str
     dueDate: date | datetime | None = None
@@ -35,6 +40,7 @@ class RecommendRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def accept_legacy_candidates(cls, data: Any) -> Any:
+        """초기 API 이름(candidates)을 쓰는 호출부와의 호환성을 유지한다."""
         if isinstance(data, dict) and "tasks" not in data and "candidates" in data:
             return {**data, "tasks": data["candidates"]}
         return data

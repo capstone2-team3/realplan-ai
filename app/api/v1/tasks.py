@@ -13,7 +13,10 @@ router = APIRouter()
 
 @router.post("/tasks/decompose", response_model=ApiResponse[TaskDecompositionResponse])
 async def decompose(req: TaskDecompositionRequest, request: Request):
-    """Spring에서 받은 태스크 목록을 실제 배치 전 세션 단위로만 분할한다."""
+    """Spring에서 받은 태스크 목록을 실제 배치 전 세션 단위로만 분할한다.
+
+    시작/종료 시각은 만들지 않고, 자동 배치 서비스가 사용할 세션 길이와 집중도만 만든다.
+    """
 
     try:
         result = await decompose_tasks(req)

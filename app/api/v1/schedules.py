@@ -13,7 +13,10 @@ router = APIRouter()
 
 @router.post("/schedules/auto-place", response_model=ApiResponse[AutoPlacementResponse])
 def auto_place(req: AutoPlacementRequest, request: Request):
-    """OpenAI가 분할한 세션을 백엔드가 제공한 가용 시간 안에만 배치한다."""
+    """OpenAI가 분할한 세션을 백엔드가 제공한 가용 시간 안에만 배치한다.
+
+    실제 일정 저장은 Spring이 담당하고, 이 엔드포인트는 계산된 배치 후보만 반환한다.
+    """
 
     try:
         result = auto_place_sessions(req)

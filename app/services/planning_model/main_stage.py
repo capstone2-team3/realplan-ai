@@ -13,9 +13,11 @@ from app.services.planning_model.base import PlanningStage
 
 
 class MainEffectStage(PlanningStage):
+    """충분한 완료 기록을 가진 사용자를 위한 main-effect 모델 자리."""
+
     def predict(self, req: PredictRequest) -> PredictResponse:
         raise NotImplementedError("MAIN_EFFECT stage not yet implemented")
 
     def update(self, req: UpdateRequest) -> UpdateResponse:
-        # TODO: Drop 판정을 early_stage.py와 동일한 방식으로 맨 앞에 추가할 것
+        # TODO: 회귀 계수 업데이트 전에 early_stage.py와 같은 이상치 Drop 판정을 먼저 적용할 것.
         raise NotImplementedError("MAIN_EFFECT stage not yet implemented")

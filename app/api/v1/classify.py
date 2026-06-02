@@ -19,6 +19,8 @@ router = APIRouter()
 @router.post("/classify", response_model=ApiResponse[ClassifyResponse])
 def classify(req: ClassifyRequest, request: Request):
     """
+    Spring 백엔드는 저장된 태스크 정보를 넘기고, Python은 분류 결과만 계산해 돌려준다.
+
     동작:
       1) user_history가 있으면 개인화 레이어 확인 (MVP에선 스킵)
       2) 없으면 OpenAI LLM으로 분류

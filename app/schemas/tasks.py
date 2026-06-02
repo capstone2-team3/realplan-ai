@@ -27,6 +27,8 @@ class TaskDecompositionRequest(BaseModel):
 
 
 class TaskSession(BaseModel):
+    """자동 배치 서비스가 사용할 세션 단위 결과."""
+
     taskId: int
     sessionMinutes: int
     requiredFocusLevel: RequiredFocusLevel

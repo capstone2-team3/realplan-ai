@@ -19,7 +19,7 @@ router = APIRouter()
 
 @router.post("/recommend", response_model=ApiResponse[RecommendResponse])
 def recommend(req: RecommendRequest, request: Request):
-    """특정 날짜와 가용시간 기준으로 오늘 수행할 태스크를 추천한다."""
+    """DB 조회 없이 요청으로 받은 후보 목록만 기준으로 오늘 수행할 태스크를 추천한다."""
     inp = RecommendInput(
         targetDate=req.targetDate,
         availableStart=req.availableStart,

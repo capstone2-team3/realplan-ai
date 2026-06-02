@@ -26,6 +26,8 @@ from app.services.classifier.types import (
 
 
 def _build_user_prompt(inp: ClassifyInput) -> str:
+    """태스크 이름과 선택 메모만 넣어 분류에 필요한 최소 컨텍스트를 만든다."""
+
     parts = [f"태스크 이름: {inp.name}"]
     if inp.memo:
         parts.append(f"메모: {inp.memo}")
@@ -84,6 +86,7 @@ def classify_task(
         temperature=0.0,
     )
 
+    # JSON 파싱 실패 시에도 추천/예측 흐름이 끊기지 않도록 보수적 fallback을 사용한다.
     raw = response.choices[0].message.content
     if not raw:
         return _fallback(reason="LLM 응답 없음")

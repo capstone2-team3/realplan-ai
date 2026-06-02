@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 
 class UpdateRequest(BaseModel):
+    """완료 기록 한 건을 기반으로 사용자별 시간 예측 계수를 갱신하기 위한 입력."""
+
     estimatedMinutes: float = Field(..., description="사용자가 입력했던 추정 소요시간(분)")
     actualMinutes: float = Field(..., description="실제 소요된 시간(분)")
     completedCount: int = Field(..., description="이번 업데이트 직전까지의 완료 태스크 누적 개수")
@@ -30,6 +32,8 @@ class UpdateRequest(BaseModel):
 
 
 class UpdateResponse(BaseModel):
+    """Spring이 저장할 새 사용자 계수와 디버깅용 학습 지표."""
+
     userGlobal: float
     userTypeResidual: dict[str, float]
     typeCount: dict[str, int]
