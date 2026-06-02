@@ -17,7 +17,7 @@ class PredictRequest(BaseModel):
     difficulty: str = Field(..., description="난이도 (예: EASY / NORMAL / HARD)")
     priority: Optional[str] = Field(
         default=None,
-        description="우선순위. 없으면 priority 효과를 0으로 처리",
+        description="Legacy unused. 초기 소요 시간 예측 계산에는 사용하지 않음",
     )
     # TODO: 현재 MAIN/INTERACTION 단계가 스텁이라 계산에 사용되지 않는다.
     # Java 호출부 호환성을 확인한 뒤 제거하거나, MAIN 단계의 명시적 계산 피처로 구현한다.
@@ -34,7 +34,10 @@ class PredictRequest(BaseModel):
     systemGlobalPrior: float
     systemTypeEffect: dict[str, float]
     systemDifficultyEffect: dict[str, float]
-    systemPriorityEffect: dict[str, float] = Field(default_factory=dict)
+    systemPriorityEffect: dict[str, float] = Field(
+        default_factory=dict,
+        description="Legacy unused. 초기 소요 시간 예측 계산에는 사용하지 않음",
+    )
 
 
 class PredictResponse(BaseModel):

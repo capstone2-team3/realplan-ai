@@ -19,21 +19,15 @@ from app.services.initial_estimator.update_policy import (
 
 
 class RuleStage(PlanningStage):
-    """사용자 개인 계수 없이 시스템 평균 보정값만 사용하는 stage."""
+    """systemGlobalPrior, type effect, difficulty effect만 사용하는 stage."""
 
     def predict(self, req: PredictRequest) -> PredictResponse:
         validate_estimated_minutes(req.estimatedMinutes)
 
-        system_priority_effect = (
-            req.systemPriorityEffect.get(req.priority, 0.0)
-            if req.priority is not None
-            else 0.0
-        )
         log_correction = (
             req.systemGlobalPrior
             + req.systemTypeEffect.get(req.taskType, 0.0)
             + req.systemDifficultyEffect.get(req.difficulty, 0.0)
-            + system_priority_effect
         )
 
         return PredictResponse(

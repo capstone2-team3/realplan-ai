@@ -132,19 +132,33 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
-def test_predict_priority_effect_is_applied_when_present():
-    """priority가 있으면 systemPriorityEffect를 logCorrection에 더한다."""
+def test_rule_stage_ignores_legacy_priority_fields():
+    """priority/systemPriorityEffect가 들어와도 RuleStage 계산에는 영향이 없다."""
     stage = RuleStage()
-    req = _make_predict_request(priority="HIGH")
-    result = stage.predict(req)
+    high_req = _make_predict_request(
+        priority="HIGH",
+        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
+    )
+    low_req = _make_predict_request(
+        priority="LOW",
+        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
+    )
+    high_result = stage.predict(high_req)
+    low_result = stage.predict(low_req)
 
-    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION"] + SYSTEM_PRIORITY["HIGH"]
-    assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
-    assert result.stage == STAGE_RULE
+    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION"]
+    assert math.isclose(high_result.logCorrection, expected_log, rel_tol=1e-9)
+    assert math.isclose(low_result.logCorrection, expected_log, rel_tol=1e-9)
+    assert math.isclose(
+        high_result.predictedMinutes,
+        low_result.predictedMinutes,
+        rel_tol=1e-9,
+    )
+    assert high_result.stage == STAGE_RULE
 
 
 def test_predict_unknown_keys_fallback_to_zero():
-    """systemTypeEffect/Difficulty/Priority에 없는 키가 들어와도 0으로 fallback."""
+    """systemTypeEffect/Difficulty에 없는 키가 들어와도 0으로 fallback."""
     stage = AverageBaselineStage()
     req = _make_predict_request(
         taskType="UNKNOWN_TYPE",
@@ -155,6 +169,27 @@ def test_predict_unknown_keys_fallback_to_zero():
 
     expected_log = SYSTEM_GLOBAL + 0.0 + 0.0
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+
+
+def test_average_stage_ignores_legacy_priority_fields():
+    """priority만 바꿔도 AverageBaselineStage 예측값은 동일해야 한다."""
+    stage = AverageBaselineStage()
+    base = dict(
+        completedCount=30,
+        userGlobal=0.2,
+        userTypeResidual={"SATISFACTION": 0.3},
+        typeCount={"SATISFACTION": 10},
+        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
+    )
+    high_result = stage.predict(_make_predict_request(priority="HIGH", **base))
+    low_result = stage.predict(_make_predict_request(priority="LOW", **base))
+
+    assert math.isclose(high_result.logCorrection, low_result.logCorrection, rel_tol=1e-9)
+    assert math.isclose(
+        high_result.predictedMinutes,
+        low_result.predictedMinutes,
+        rel_tol=1e-9,
+    )
 
 
 # ---------- update -----------------------------------------------------
@@ -205,6 +240,34 @@ def test_update_returns_new_global_and_residual():
     assert result.typeCount["SATISFACTION"] == 6
     assert result.difficultyCount["NORMAL"] == 3
     assert result.stage == STAGE_AVERAGE_BASELINE
+
+
+def test_update_residual_target_ignores_legacy_priority_fields():
+    stage = AverageBaselineStage()
+    base = dict(
+        estimatedMinutes=60.0,
+        actualMinutes=90.0,
+        taskType="SATISFACTION",
+        difficulty="NORMAL",
+        userGlobal=0.0,
+        userTypeResidual={"SATISFACTION": 0.0},
+        userDifficultyResidual={"NORMAL": 0.0},
+        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
+    )
+
+    high_result = stage.update(_make_update_request(priority="HIGH", **base))
+    low_result = stage.update(_make_update_request(priority="LOW", **base))
+
+    assert math.isclose(
+        high_result.userTypeResidual["SATISFACTION"],
+        low_result.userTypeResidual["SATISFACTION"],
+        rel_tol=1e-9,
+    )
+    assert math.isclose(
+        high_result.userDifficultyResidual["NORMAL"],
+        low_result.userDifficultyResidual["NORMAL"],
+        rel_tol=1e-9,
+    )
 
 
 def test_update_clamps_upper_bound():
@@ -500,4 +563,6 @@ def test_training_record_contains_update_snapshot():
     assert record["task_type"] == "SATISFACTION"
     assert record["user_difficulty_residual_at_prediction"] == {"NORMAL": -0.1}
     assert record["difficulty_count_at_prediction"] == {"NORMAL": 2}
+    assert "priority" not in record
+    assert "system_priority_effect_at_prediction" not in record
     assert record["model_version"] == "test"

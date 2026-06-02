@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class AverageBaselineStage(PlanningStage):
-    """사용자 global/type/difficulty residual을 shrinkage로 반영하는 baseline."""
+    """safe user global, type/difficulty effect, 사용자 residual을 반영하는 baseline."""
 
     stage_label = STAGE_AVERAGE_BASELINE
 
@@ -50,11 +50,6 @@ class AverageBaselineStage(PlanningStage):
 
         system_type_effect = req.systemTypeEffect.get(req.taskType, 0.0)
         system_difficulty_effect = req.systemDifficultyEffect.get(req.difficulty, 0.0)
-        system_priority_effect = (
-            req.systemPriorityEffect.get(req.priority, 0.0)
-            if req.priority is not None
-            else 0.0
-        )
 
         user_type_residual = dict(req.userTypeResidual or {}).get(req.taskType, 0.0)
         type_count = dict(req.typeCount or {}).get(req.taskType, 0)
@@ -73,7 +68,6 @@ class AverageBaselineStage(PlanningStage):
             safe_user_global
             + system_type_effect
             + system_difficulty_effect
-            + system_priority_effect
             + r_type * user_type_residual
             + r_difficulty * user_difficulty_residual
         )
@@ -109,17 +103,11 @@ class AverageBaselineStage(PlanningStage):
 
         system_type_effect = req.systemTypeEffect.get(req.taskType, 0.0)
         system_difficulty_effect = req.systemDifficultyEffect.get(req.difficulty, 0.0)
-        system_priority_effect = (
-            req.systemPriorityEffect.get(req.priority, 0.0)
-            if req.priority is not None
-            else 0.0
-        )
         residual_target = (
             clamped_log_ratio
             - user_global_old
             - system_type_effect
             - system_difficulty_effect
-            - system_priority_effect
         )
 
         type_residual_map: dict[str, float] = dict(req.userTypeResidual or {})
