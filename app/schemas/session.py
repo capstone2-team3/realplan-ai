@@ -20,13 +20,16 @@ class SessionRemainingRequest(BaseModel):
     focusLevel: FocusLevel = Field(..., description="사용자 입력 집중도")
     previousAiTotalMinutes: float = Field(
         ...,
-        description="직전 AI 예측 총 소요시간(분). Spring에서 주입.",
+        description=(
+            "직전 AI 예측 총 소요시간(분). ",
+            "첫 세션 종료 시에는 최초 예측값, 이후에는 직전 updatedAiTotalMinutes를 사용한다. "
+        )
     )
 
 
 class SessionRemainingResponse(BaseModel):
     progressBasedRemainingMinutes: float   # Step 1: 진행률 기반 잔여시간
-    focusAdjustedRemainingMinutes: float   # Step 2: 집중도 보정 후 잔여시간
+    normalizedRemainingMinutes: float   # Step 2: 집중도 보정 후 잔여시간
     blendingWeight: float                  # Step 3: 실제 적용된 blendingWeight
     finalRemainingMinutes: float           # Step 4: 최종 잔여시간 (0 clamp)
     updatedAiTotalMinutes: float           # Step 4: 다음 세션에 주입할 AI 예측 총 소요시간

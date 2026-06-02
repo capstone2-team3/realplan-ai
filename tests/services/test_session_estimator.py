@@ -36,7 +36,7 @@ def test_normal_focus_baseline():
     elapsed=70, progress=0.5, NORMAL(1.0), prev=200
       progressBased       = 70 × (1/0.5 - 1)            = 70
       focusAdjusted       = 70 × 1.0                    = 70
-      focus_adjusted_total= 70 + 70                     = 140
+      normal_focus_total= 70 + 70                     = 140
       blendingWeight      = 0.4 × 0.5                   = 0.2
       ai_total_pre        = 0.2×140 + 0.8×200           = 188
       raw_remaining       = 188 - 70                    = 118 (> 0)
@@ -47,7 +47,7 @@ def test_normal_focus_baseline():
 
     assert math.isclose(result.focusWeight, 1.0)
     assert math.isclose(result.progressBasedRemainingMinutes, 70.0, rel_tol=1e-9)
-    assert math.isclose(result.focusAdjustedRemainingMinutes, 70.0, rel_tol=1e-9)
+    assert math.isclose(result.normalizedRemainingMinutes, 70.0, rel_tol=1e-9)
     assert math.isclose(result.blendingWeight, 0.2, rel_tol=1e-9)
     assert math.isclose(result.finalRemainingMinutes, 118.0, rel_tol=1e-9)
     assert math.isclose(result.updatedAiTotalMinutes, 188.0, rel_tol=1e-9)
@@ -66,8 +66,8 @@ def test_distracted_normalizes_to_shorter():
 
     assert math.isclose(result.focusWeight, 0.8)
     assert math.isclose(result.progressBasedRemainingMinutes, expected_progress_based, rel_tol=1e-9)
-    assert math.isclose(result.focusAdjustedRemainingMinutes, expected_focus_adjusted, rel_tol=1e-9)
-    assert result.focusAdjustedRemainingMinutes < result.progressBasedRemainingMinutes
+    assert math.isclose(result.normalizedRemainingMinutes, expected_focus_adjusted, rel_tol=1e-9)
+    assert result.normalizedRemainingMinutes < result.progressBasedRemainingMinutes
 
 
 def test_flow_normalizes_to_longer():
@@ -79,8 +79,8 @@ def test_flow_normalizes_to_longer():
     expected_focus_adjusted = expected_progress_based * 1.5
 
     assert math.isclose(result.focusWeight, 1.5)
-    assert math.isclose(result.focusAdjustedRemainingMinutes, expected_focus_adjusted, rel_tol=1e-9)
-    assert result.focusAdjustedRemainingMinutes > result.progressBasedRemainingMinutes
+    assert math.isclose(result.normalizedRemainingMinutes, expected_focus_adjusted, rel_tol=1e-9)
+    assert result.normalizedRemainingMinutes > result.progressBasedRemainingMinutes
 
 
 def test_focus_weight_map_matches_spec():
@@ -113,7 +113,7 @@ def test_incomplete_overrun_gets_30min_fallback():
     """progress < 1.0인데 예측이 음수로 떨어지면 스케줄링용 30분 fallback."""
     # elapsed=200, progress=0.5, NORMAL, prev=120
     #   progressBased=200, focusAdjusted=200
-    #   focus_adjusted_total=400, blendingWeight=0.2
+    #   normal_focus_total=400, blendingWeight=0.2
     #   ai_total_pre = 0.2×400 + 0.8×120 = 176
     #   raw_remaining = 176 - 200 = -24 ≤ 0 AND progress < 1.0 → final=30.0
     result = estimate_remaining(
@@ -127,7 +127,7 @@ def test_completed_overrun_clamps_to_zero():
     """progress = 1.0 (완료)이면 30분 fallback 없이 0으로 clamp."""
     # elapsed=200, progress=1.0, NORMAL, prev=120
     #   progressBased = 200 × (1/1.0 - 1) = 0
-    #   focusAdjusted = 0, focus_adjusted_total = 200
+    #   focusAdjusted = 0, normal_focus_total = 200
     #   blendingWeight = 0.4
     #   ai_total_pre = 0.4×200 + 0.6×120 = 152
     #   raw_remaining = -48 ≤ 0 AND progress >= 1.0 → final=0.0

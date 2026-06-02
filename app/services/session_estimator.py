@@ -42,16 +42,16 @@ def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse
     # Step 2: 집중도 보정 — 현재 집중도 기준 잔여시간을 보통 집중 기준으로 환산.
     # 산만(0.8): 160분 × 0.6 = 96분 (보통으로 하면 더 빨리 끝남)
     # 몰입(1.5): 30분 × 1.5 = 45분 (보통으로 하면 더 오래 걸림)
-    focus_adjusted_remaining = progress_based_remaining * focus_weight
+    normal_focus_remaining = progress_based_remaining * focus_weight
 
     # Step 3: 두 총 소요시간 추정값을 blending.
-    # - focus_adjusted_total: 진행률+집중도 기반 총 소요시간 추정값
+    # - normal_focus_total: 진행률+집중도 기반 총 소요시간 추정값
     # - previousAiTotalMinutes: 기존 AI 예측 총 소요시간
     # 진행률이 낮을수록 진행률 기반 추정의 신뢰도가 낮으므로 기존 AI 예측을 더 신뢰한다.
-    focus_adjusted_total = req.elapsedMinutes + focus_adjusted_remaining
+    normal_focus_total = req.elapsedMinutes + normal_focus_remaining
     blending_weight = BLENDING_WEIGHT_BASE * req.progress
     updated_ai_total = (
-        blending_weight * focus_adjusted_total
+        blending_weight * normal_focus_total
         + (1 - blending_weight) * req.previousAiTotalMinutes
     )
 
@@ -67,7 +67,7 @@ def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse
 
     return SessionRemainingResponse(
         progressBasedRemainingMinutes=progress_based_remaining,
-        focusAdjustedRemainingMinutes=focus_adjusted_remaining,
+        normalizedRemainingMinutes=normal_focus_remaining,
         blendingWeight=blending_weight,
         finalRemainingMinutes=final_remaining,
         updatedAiTotalMinutes=updated_ai_total,
