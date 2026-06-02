@@ -7,7 +7,7 @@
 
 전제:
 - 모든 사용자가 신규 사용자(userGlobal=None). 시스템 prior만으로 예측.
-- 모든 태스크가 EARLY 단계(completed < 50)에 해당.
+- completedCount=0은 RULE, 이후 낮은 completedCount는 RULE_AVERAGE_BLEND에 해당.
 - 시스템 prior 값은 실제 누적 통계가 없으므로 합리적 추정값을 사용한다.
   실데이터로 튜닝 시 update 결과를 모아 재산정해야 한다.
 """
@@ -43,6 +43,7 @@ def _print_formula_header():
     print("                   + systemTypeEffect[type]")
     print("                   + systemDifficultyEffect[difficulty]")
     print("                   + r_type × userTypeResidual[type]")
+    print("                   + r_difficulty × userDifficultyResidual[difficulty]")
     print("  predictedMinutes = estimatedMinutes × exp(logCorrection)")
     print()
     print("[update]")
@@ -57,7 +58,9 @@ def _print_formula_header():
     print("                         - systemDifficultyEffect[difficulty]")
     print("  userTypeResidual_new   = (1 - ETA_TYPE) × userTypeResidual_old")
     print("                         + ETA_TYPE × residualTarget")
+    print("  userDifficultyResidual_new도 residualTarget을 EMA로 반영")
     print("  typeCount[type]       += 1   (drop 아닐 때만)")
+    print("  difficultyCount[diff] += 1   (drop 아닐 때만)")
     print()
     print("====================== 상수값 ======================")
     print(f"  ETA_GLOBAL          = {ETA_GLOBAL}    (userGlobal EMA 학습률)")
@@ -169,7 +172,7 @@ def test_predict_all_real_tasks_and_print_table():
               f"{estimated:>5.0f} → {result.predictedMinutes:>6.1f}  ({ratio:>5.1%})")
 
         assert result.predictedMinutes > 0
-        assert result.stage == "EARLY"
+        assert result.stage == "RULE"
 
     print("-" * 60)
     overall_ratio = total_predicted / total_estimated
@@ -184,7 +187,7 @@ def test_predict_per_user_with_sequential_completed_count():
     """사용자별로 completedCount를 0부터 순차 증가시켜 예측.
 
     실 사용 시 Spring은 사용자별 누적 완료 수를 보내므로 그 흐름을 흉내낸다.
-    어차피 모든 값이 50 미만이라 stage는 EARLY로 일정해야 한다.
+    첫 예측은 RULE, 이후 낮은 completedCount에서는 RULE_AVERAGE_BLEND가 사용된다.
     """
     from collections import defaultdict
     counts = defaultdict(int)
@@ -192,7 +195,8 @@ def test_predict_per_user_with_sequential_completed_count():
     for user, _tid, _name, type_kr, estimated, difficulty_kr in REAL_TASKS:
         req = _build_request(estimated, type_kr, difficulty_kr, completed=counts[user])
         result = calculate_prediction(req)
-        assert result.stage == "EARLY"
+        expected_stage = "RULE" if counts[user] == 0 else "RULE_AVERAGE_BLEND"
+        assert result.stage == expected_stage
         counts[user] += 1
 
 
@@ -240,7 +244,13 @@ def test_simulate_predict_update_cycle_per_user():
 
         state = user_state.setdefault(
             user,
-            {"userGlobal": None, "userTypeResidual": None, "typeCount": None},
+            {
+                "userGlobal": None,
+                "userTypeResidual": None,
+                "userDifficultyResidual": None,
+                "typeCount": None,
+                "difficultyCount": None,
+            },
         )
         completed = sum(state["typeCount"].values()) if state["typeCount"] else 0
         task_type_code = TASK_TYPE_MAP[type_kr]
@@ -256,7 +266,9 @@ def test_simulate_predict_update_cycle_per_user():
                 folderId=None,
                 userGlobal=state["userGlobal"],
                 userTypeResidual=state["userTypeResidual"],
+                userDifficultyResidual=state["userDifficultyResidual"],
                 typeCount=state["typeCount"],
+                difficultyCount=state["difficultyCount"],
                 systemGlobalPrior=SYSTEM_GLOBAL_PRIOR,
                 systemTypeEffect=SYSTEM_TYPE_EFFECT,
                 systemDifficultyEffect=SYSTEM_DIFFICULTY_EFFECT,
@@ -275,7 +287,9 @@ def test_simulate_predict_update_cycle_per_user():
                 folderId=None,
                 userGlobal=state["userGlobal"],
                 userTypeResidual=state["userTypeResidual"],
+                userDifficultyResidual=state["userDifficultyResidual"],
                 typeCount=state["typeCount"],
+                difficultyCount=state["difficultyCount"],
                 systemGlobalPrior=SYSTEM_GLOBAL_PRIOR,
                 systemTypeEffect=SYSTEM_TYPE_EFFECT,
                 systemDifficultyEffect=SYSTEM_DIFFICULTY_EFFECT,
@@ -284,7 +298,9 @@ def test_simulate_predict_update_cycle_per_user():
 
         state["userGlobal"] = upd.userGlobal
         state["userTypeResidual"] = upd.userTypeResidual
+        state["userDifficultyResidual"] = upd.userDifficultyResidual
         state["typeCount"] = upd.typeCount
+        state["difficultyCount"] = upd.difficultyCount
 
         residual_for_type = upd.userTypeResidual.get(task_type_code, 0.0)
         # 어떤 분기를 탔는지 표시
@@ -309,10 +325,15 @@ def test_simulate_predict_update_cycle_per_user():
     for user, state in user_state.items():
         type_counts = state["typeCount"] or {}
         residuals = state["userTypeResidual"] or {}
+        difficulty_counts = state["difficultyCount"] or {}
+        difficulty_residuals = state["userDifficultyResidual"] or {}
         print(f"{user}: userGlobal={state['userGlobal']:+.3f}")
         for type_code, count in type_counts.items():
             res = residuals.get(type_code, 0.0)
             print(f"    {type_code:<20} n={count:>2}  residual={res:+.3f}")
+        for difficulty_code, count in difficulty_counts.items():
+            res = difficulty_residuals.get(difficulty_code, 0.0)
+            print(f"    {difficulty_code:<20} n={count:>2}  residual={res:+.3f}")
 
 
 # ---------- 유형/난이도별 보정 방향 검증 -------------------------------

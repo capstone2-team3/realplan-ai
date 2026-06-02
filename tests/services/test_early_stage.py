@@ -11,21 +11,33 @@ from app.schemas.update import UpdateRequest
 from app.services.initial_estimator.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
+    DIFFICULTY_SHRINKAGE_N,
+    ETA_DIFFICULTY,
     DROP_RATIO_MAX,
     DROP_RATIO_MIN,
     ETA_GLOBAL,
     ETA_TYPE,
+    MAIN_THRESHOLD,
+    STAGE_AVERAGE_BASELINE,
     STAGE_EARLY,
-    STAGE_EARLY_MAIN_BLEND,
+    STAGE_MAIN_INTERACTION_BLEND,
+    STAGE_RULE,
+    STAGE_RULE_AVERAGE_BLEND,
     TYPE_SHRINKAGE_N,
+    USER_GLOBAL_SHRINKAGE_N,
+    EARLY_THRESHOLD,
 )
+from app.services.initial_estimator.average_stage import AverageBaselineStage
 from app.services.initial_estimator.early_stage import EarlyStage
 from app.services.initial_estimator.router import PlanningRouter, sigmoid_weight
+from app.services.initial_estimator.rule_stage import RuleStage
+from app.services.initial_estimator.training_record import build_initial_training_record
 
 
 SYSTEM_GLOBAL = 0.1
 SYSTEM_TYPE = {"SATISFACTION": 0.05, "PROBLEM_SOLVING": -0.02}
 SYSTEM_DIFFICULTY = {"EASY": -0.03, "NORMAL": 0.0, "HARD": 0.08}
+SYSTEM_PRIORITY = {"HIGH": 0.07, "LOW": -0.04}
 
 
 def _make_predict_request(**overrides):
@@ -37,10 +49,13 @@ def _make_predict_request(**overrides):
         folderId=None,
         userGlobal=None,
         userTypeResidual=None,
+        userDifficultyResidual=None,
         typeCount=None,
+        difficultyCount=None,
         systemGlobalPrior=SYSTEM_GLOBAL,
         systemTypeEffect=SYSTEM_TYPE,
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
+        systemPriorityEffect=SYSTEM_PRIORITY,
     )
     base.update(overrides)
     return PredictRequest(**base)
@@ -56,10 +71,13 @@ def _make_update_request(**overrides):
         folderId=None,
         userGlobal=None,
         userTypeResidual=None,
+        userDifficultyResidual=None,
         typeCount=None,
+        difficultyCount=None,
         systemGlobalPrior=SYSTEM_GLOBAL,
         systemTypeEffect=SYSTEM_TYPE,
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
+        systemPriorityEffect=SYSTEM_PRIORITY,
     )
     base.update(overrides)
     return UpdateRequest(**base)
@@ -85,31 +103,54 @@ def test_predict_new_user_uses_prior_only():
 
 
 def test_predict_existing_user_applies_residual_with_shrinkage():
-    """기존 사용자: userGlobal + r_type * residual 적용."""
-    stage = EarlyStage()
+    """기존 사용자: safe_user_global + type/difficulty residual shrinkage 적용."""
+    stage = AverageBaselineStage()
     req = _make_predict_request(
+        completedCount=30,
         taskType="PROBLEM_SOLVING",
-        difficulty="NORMAL",
+        difficulty="HARD",
         userGlobal=0.2,
         userTypeResidual={"PROBLEM_SOLVING": 0.4},
+        userDifficultyResidual={"HARD": 0.3},
         typeCount={"PROBLEM_SOLVING": 30},
+        difficultyCount={"HARD": 20},
     )
     result = stage.predict(req)
 
+    user_weight = 30 / (30 + USER_GLOBAL_SHRINKAGE_N)
+    safe_user_global = user_weight * 0.2 + (1 - user_weight) * SYSTEM_GLOBAL
     r_type = 30 / (30 + TYPE_SHRINKAGE_N)
+    r_difficulty = 20 / (20 + DIFFICULTY_SHRINKAGE_N)
     expected_log = (
-        0.2
+        safe_user_global
         + SYSTEM_TYPE["PROBLEM_SOLVING"]
-        + SYSTEM_DIFFICULTY["NORMAL"]
+        + SYSTEM_DIFFICULTY["HARD"]
         + r_type * 0.4
+        + r_difficulty * 0.3
     )
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+    assert result.stage == STAGE_AVERAGE_BASELINE
+
+
+def test_predict_priority_effect_is_applied_when_present():
+    """priority가 있으면 systemPriorityEffect를 logCorrection에 더한다."""
+    stage = RuleStage()
+    req = _make_predict_request(priority="HIGH")
+    result = stage.predict(req)
+
+    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION"] + SYSTEM_PRIORITY["HIGH"]
+    assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+    assert result.stage == STAGE_RULE
 
 
 def test_predict_unknown_keys_fallback_to_zero():
-    """systemTypeEffect/Difficulty에 없는 키가 들어와도 0으로 fallback."""
-    stage = EarlyStage()
-    req = _make_predict_request(taskType="UNKNOWN_TYPE", difficulty="UNKNOWN")
+    """systemTypeEffect/Difficulty/Priority에 없는 키가 들어와도 0으로 fallback."""
+    stage = AverageBaselineStage()
+    req = _make_predict_request(
+        taskType="UNKNOWN_TYPE",
+        difficulty="UNKNOWN",
+        priority="UNKNOWN",
+    )
     result = stage.predict(req)
 
     expected_log = SYSTEM_GLOBAL + 0.0 + 0.0
@@ -121,7 +162,7 @@ def test_predict_unknown_keys_fallback_to_zero():
 
 def test_update_returns_new_global_and_residual():
     """update 후 userGlobal/userTypeResidual EMA가 정확히 반영된다."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=60.0,
         actualMinutes=90.0,
@@ -129,7 +170,9 @@ def test_update_returns_new_global_and_residual():
         difficulty="NORMAL",
         userGlobal=0.0,
         userTypeResidual={"SATISFACTION": 0.0},
+        userDifficultyResidual={"NORMAL": 0.0},
         typeCount={"SATISFACTION": 5},
+        difficultyCount={"NORMAL": 2},
     )
     result = stage.update(req)
 
@@ -137,9 +180,16 @@ def test_update_returns_new_global_and_residual():
     clamped = max(CLAMP_MIN, min(CLAMP_MAX, log_ratio))
     expected_global = (1 - ETA_GLOBAL) * 0.0 + ETA_GLOBAL * clamped
     residual_target = (
-        clamped - 0.0 - SYSTEM_TYPE["SATISFACTION"] - SYSTEM_DIFFICULTY["NORMAL"]
+        clamped
+        - 0.0
+        - SYSTEM_TYPE["SATISFACTION"]
+        - SYSTEM_DIFFICULTY["NORMAL"]
     )
     expected_residual = (1 - ETA_TYPE) * 0.0 + ETA_TYPE * residual_target
+    expected_difficulty_residual = (
+        (1 - ETA_DIFFICULTY) * 0.0
+        + ETA_DIFFICULTY * residual_target
+    )
 
     assert math.isclose(result.logRatio, log_ratio, rel_tol=1e-9)
     assert math.isclose(result.clampedLogRatio, clamped, rel_tol=1e-9)
@@ -147,8 +197,14 @@ def test_update_returns_new_global_and_residual():
     assert math.isclose(
         result.userTypeResidual["SATISFACTION"], expected_residual, rel_tol=1e-9
     )
+    assert math.isclose(
+        result.userDifficultyResidual["NORMAL"],
+        expected_difficulty_residual,
+        rel_tol=1e-9,
+    )
     assert result.typeCount["SATISFACTION"] == 6
-    assert result.stage == STAGE_EARLY
+    assert result.difficultyCount["NORMAL"] == 3
+    assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_update_clamps_upper_bound():
@@ -294,7 +350,9 @@ def test_drop_new_user_uses_system_prior_for_user_global():
     assert result.dropped is True
     assert result.userGlobal == SYSTEM_GLOBAL
     assert result.userTypeResidual == {}
+    assert result.userDifficultyResidual == {}
     assert result.typeCount == {}
+    assert result.difficultyCount == {}
 
 
 def test_drop_constants_are_aligned_with_clamp():
@@ -306,24 +364,45 @@ def test_drop_constants_are_aligned_with_clamp():
 # ---------- router & soft blending -------------------------------------
 
 
-def test_router_below_threshold_returns_early():
-    router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=49))
+def test_early_stage_wrapper_keeps_early_stage_label():
+    stage = EarlyStage()
+    result = stage.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
     assert result.stage == STAGE_EARLY
 
 
-def test_router_blend_window_falls_back_to_early_when_main_is_stub():
-    """50~59 구간: MAIN 스텁이면 EARLY 단독 결과로 폴백되고 stage='EARLY'."""
+def test_router_completed_zero_returns_rule():
     router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=55))
-    assert result.stage == STAGE_EARLY
+    result = router.predict(_make_predict_request(completedCount=0))
+    assert result.stage == STAGE_RULE
 
 
-def test_router_main_only_window_falls_back_to_early():
-    """60~199: MAIN 단독 윈도우. 스텁이면 EARLY 결과로 폴백."""
+def test_router_low_count_returns_rule_average_blend():
+    """1 이상 EARLY_THRESHOLD 미만이면 RULE과 AVERAGE를 log 공간에서 섞는다."""
     router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=120))
-    assert result.stage == STAGE_EARLY
+    req = _make_predict_request(completedCount=5, userGlobal=0.4)
+    result = router.predict(req)
+    rule = router.rule.predict(req)
+    average = router.average.predict(req)
+    w_average = req.completedCount / EARLY_THRESHOLD
+    expected_log = (
+        (1 - w_average) * rule.logCorrection
+        + w_average * average.logCorrection
+    )
+
+    assert result.stage == STAGE_RULE_AVERAGE_BLEND
+    assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+    assert math.isclose(
+        result.predictedMinutes,
+        req.estimatedMinutes * math.exp(expected_log),
+        rel_tol=1e-9,
+    )
+
+
+def test_router_average_window_returns_average():
+    """EARLY_THRESHOLD 이상 MAIN_THRESHOLD 미만이면 average baseline을 사용한다."""
+    router = PlanningRouter()
+    result = router.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
+    assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_sigmoid_weight_monotonic_and_centered():
@@ -336,34 +415,89 @@ def test_sigmoid_weight_monotonic_and_centered():
     assert math.isclose(w_b + (1 - w_b), 1.0, rel_tol=1e-12)
 
 
-def test_blend_label_used_when_both_stages_available(monkeypatch):
-    """MAIN 스텁이 동작하도록 가짜 구현으로 패치하면 stage가 BLEND 라벨이 된다."""
+def test_main_interaction_blend_label_used_when_both_stages_available(monkeypatch):
+    """MAIN/INTERACTION 가짜 구현으로 패치하면 log 공간 blending이 적용된다."""
     from app.schemas.predict import PredictResponse
 
     router = PlanningRouter()
 
     def fake_main_predict(req):
-        # 단순히 estimatedMinutes 그대로 반환 (logCorrection=0)
         return PredictResponse(
             predictedMinutes=req.estimatedMinutes,
             logCorrection=0.0,
             stage="MAIN_EFFECT",
         )
 
+    def fake_interaction_predict(req):
+        return PredictResponse(
+            predictedMinutes=req.estimatedMinutes * math.exp(0.4),
+            logCorrection=0.4,
+            stage="INTERACTION",
+        )
+
     monkeypatch.setattr(router.main, "predict", fake_main_predict)
+    monkeypatch.setattr(router.interaction, "predict", fake_interaction_predict)
 
-    result = router.predict(_make_predict_request(completedCount=55))
-    assert result.stage == STAGE_EARLY_MAIN_BLEND
+    req = _make_predict_request(completedCount=MAIN_THRESHOLD + 5)
+    result = router.predict(req)
+    assert result.stage == STAGE_MAIN_INTERACTION_BLEND
+    w_b = sigmoid_weight(req.completedCount, MAIN_THRESHOLD)
+    expected_log = w_b * 0.4
+    assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+    assert math.isclose(
+        result.predictedMinutes,
+        req.estimatedMinutes * math.exp(expected_log),
+        rel_tol=1e-9,
+    )
 
-    # 49: EARLY only
-    result_49 = router.predict(_make_predict_request(completedCount=49))
-    assert result_49.stage == STAGE_EARLY
+    result_average = router.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
+    assert result_average.stage == STAGE_AVERAGE_BASELINE
+
+
+def test_router_interaction_only_window_falls_back_to_early():
+    """INTERACTION과 MAIN이 모두 스텁이어도 AVERAGE 결과로 폴백한다."""
+    router = PlanningRouter()
+    result = router.predict(_make_predict_request(completedCount=120))
+    assert result.stage == STAGE_AVERAGE_BASELINE
+
+
+def test_router_main_interaction_blend_window_falls_back_to_early():
+    """MAIN→INTERACTION 전환 구간에서 MAIN 스텁이면 AVERAGE 결과로 폴백한다."""
+    router = PlanningRouter()
+    result = router.predict(_make_predict_request(completedCount=105))
+    assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_router_update_falls_back_when_main_stub(caplog):
-    """50 이상 구간에서 MAIN.update가 스텁이면 EARLY로 폴백."""
+    """MAIN 이상 구간에서 MAIN.update가 스텁이면 AVERAGE로 폴백."""
     router = PlanningRouter()
-    req = _make_update_request(completedCount=75)
+    req = _make_update_request(completedCount=120)
     result = router.update(req)
-    assert result.stage == STAGE_EARLY
+    assert result.stage == STAGE_AVERAGE_BASELINE
     assert result.typeCount["SATISFACTION"] == 1
+    assert result.difficultyCount["NORMAL"] == 1
+
+
+def test_training_record_contains_update_snapshot():
+    req = _make_update_request(
+        userGlobal=0.2,
+        userTypeResidual={"SATISFACTION": 0.1},
+        userDifficultyResidual={"NORMAL": -0.1},
+        typeCount={"SATISFACTION": 3},
+        difficultyCount={"NORMAL": 2},
+    )
+    record = build_initial_training_record(
+        req=req,
+        task_id=11,
+        user_id=22,
+        predicted_minutes=70.0,
+        predicted_log_correction=0.2,
+        model_version="test",
+    )
+
+    assert record["task_id"] == 11
+    assert record["user_id"] == 22
+    assert record["task_type"] == "SATISFACTION"
+    assert record["user_difficulty_residual_at_prediction"] == {"NORMAL": -0.1}
+    assert record["difficulty_count_at_prediction"] == {"NORMAL": 2}
+    assert record["model_version"] == "test"

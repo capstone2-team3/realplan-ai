@@ -16,6 +16,10 @@ class UpdateRequest(BaseModel):
     taskType: str
 
     difficulty: str
+    priority: Optional[str] = Field(
+        default=None,
+        description="우선순위. 없으면 priority 효과를 0으로 처리",
+    )
     # TODO: 현재 MAIN/INTERACTION 단계가 스텁이라 계산에 사용되지 않는다.
     # Java 호출부 호환성을 확인한 뒤 제거하거나, MAIN 단계의 명시적 계산 피처로 구현한다.
     folderId: Optional[str] = None
@@ -23,12 +27,15 @@ class UpdateRequest(BaseModel):
     # 업데이트 전 현재 계수 (없으면 신규 사용자)
     userGlobal: Optional[float] = None
     userTypeResidual: Optional[dict[str, float]] = None
+    userDifficultyResidual: Optional[dict[str, float]] = None
     typeCount: Optional[dict[str, int]] = None
+    difficultyCount: Optional[dict[str, int]] = None
 
     # 시스템 prior
     systemGlobalPrior: float
     systemTypeEffect: dict[str, float]
     systemDifficultyEffect: dict[str, float]
+    systemPriorityEffect: dict[str, float] = Field(default_factory=dict)
 
 
 class UpdateResponse(BaseModel):
@@ -36,7 +43,9 @@ class UpdateResponse(BaseModel):
 
     userGlobal: float
     userTypeResidual: dict[str, float]
+    userDifficultyResidual: dict[str, float] = Field(default_factory=dict)
     typeCount: dict[str, int]
+    difficultyCount: dict[str, int] = Field(default_factory=dict)
     logRatio: float
     clampedLogRatio: float
     stage: str

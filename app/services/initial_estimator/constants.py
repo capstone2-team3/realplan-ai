@@ -1,4 +1,4 @@
-"""planning_model 패키지 내부 상수."""
+"""초기 소요 시간 예측 모델 내부 상수."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ import math
 # EMA 학습률
 ETA_GLOBAL = 0.10
 ETA_TYPE = 0.15
+ETA_DIFFICULTY = 0.10
 
 # Shrinkage 강도
 TYPE_SHRINKAGE_N = 10          # r_type = typeCount / (typeCount + 10)
+DIFFICULTY_SHRINKAGE_N = 10    # r_difficulty = difficultyCount / (difficultyCount + 10)
+USER_GLOBAL_SHRINKAGE_N = 10   # user_weight = completedCount / (completedCount + 10)
 SYSTEM_SHRINKAGE_N = 50        # 시스템 effect shrinkage
 
 # log(actual/estimated) clamp 경계
@@ -24,11 +27,14 @@ DROP_RATIO_MIN = 0.1
 FOLDER_MIN_TASKS = 5
 
 # 단계 전환 임계값
-EARLY_THRESHOLD = 50           # completed < 50 → EARLY only
-MAIN_THRESHOLD = 200           # completed < 200 → MAIN
+EARLY_THRESHOLD = 20           # 1 <= completed < 20 → RULE_AVERAGE_BLEND
+MAIN_THRESHOLD = 100           # completed < 100 → MAIN
 BLEND_TRANSITION_WIDTH = 10    # soft blending sigmoid 폭
 
 # Stage 라벨
+STAGE_RULE = "RULE"
+STAGE_AVERAGE_BASELINE = "AVERAGE_BASELINE"
+STAGE_RULE_AVERAGE_BLEND = "RULE_AVERAGE_BLEND"
 STAGE_EARLY = "EARLY"
 STAGE_MAIN = "MAIN_EFFECT"
 STAGE_INTERACTION = "INTERACTION"
