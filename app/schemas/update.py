@@ -14,6 +14,8 @@ class UpdateRequest(BaseModel):
     taskType: str
 
     difficulty: str
+    # TODO: 현재 MAIN/INTERACTION 단계가 스텁이라 계산에 사용되지 않는다.
+    # Java 호출부 호환성을 확인한 뒤 제거하거나, MAIN 단계의 명시적 계산 피처로 구현한다.
     folderId: Optional[str] = None
 
     # 업데이트 전 현재 계수 (없으면 신규 사용자)

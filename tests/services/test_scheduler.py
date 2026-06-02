@@ -37,7 +37,6 @@ def _task(
 def _recommend(tasks: list[CandidateTask], start: time = time(9), end: time = time(12)):
     return recommend_tasks(
         RecommendInput(
-            userId=1,
             targetDate=TARGET_DATE,
             availableStart=start,
             availableEnd=end,

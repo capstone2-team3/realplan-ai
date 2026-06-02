@@ -21,7 +21,6 @@ router = APIRouter()
 def recommend(req: RecommendRequest, request: Request):
     """특정 날짜와 가용시간 기준으로 오늘 수행할 태스크를 추천한다."""
     inp = RecommendInput(
-        userId=req.userId,
         targetDate=req.targetDate,
         availableStart=req.availableStart,
         availableEnd=req.availableEnd,

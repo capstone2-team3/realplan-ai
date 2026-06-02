@@ -27,7 +27,6 @@ class RecommendCandidateDTO(BaseModel):
 class RecommendRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    userId: int
     targetDate: date
     availableStart: time
     availableEnd: time

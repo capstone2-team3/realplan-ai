@@ -29,7 +29,6 @@ class CandidateTask:
 
 @dataclass(frozen=True)
 class RecommendInput:
-    userId: int
     targetDate: date
     availableStart: time
     availableEnd: time
