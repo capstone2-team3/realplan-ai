@@ -1,4 +1,4 @@
-"""POST /v1/tasks/decompose — 태스크를 세션 단위로 분할."""
+"""POST /v1/tasks/decompose — OpenAI 기반 태스크 세션 분할."""
 
 from __future__ import annotations
 
@@ -11,7 +11,12 @@ from app.services.task_decomposition import decompose_tasks
 router = APIRouter()
 
 
-@router.post("/tasks/decompose", response_model=ApiResponse[TaskDecompositionResponse])
+@router.post(
+    "/tasks/decompose",
+    response_model=ApiResponse[TaskDecompositionResponse],
+    summary="OpenAI 기반 태스크 세션 분할",
+    description="태스크 목록을 실제 일정 배치 전 사용할 세션 단위로 분할해 반환한다.",
+)
 async def decompose(req: TaskDecompositionRequest, request: Request):
     """Spring에서 받은 태스크 목록을 실제 배치 전 세션 단위로만 분할한다.
 

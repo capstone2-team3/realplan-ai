@@ -1,4 +1,4 @@
-"""/predict 서비스 진입점."""
+"""/tasks/estimate 서비스 진입점."""
 
 from __future__ import annotations
 

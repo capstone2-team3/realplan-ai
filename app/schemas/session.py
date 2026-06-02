@@ -1,4 +1,4 @@
-"""/session/remaining 엔드포인트 DTO."""
+"""/sessions/estimate 엔드포인트 DTO."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ class SessionRemainingRequest(BaseModel):
     previousAiTotalMinutes: float = Field(
         ...,
         description=(
-            "직전 AI 예측 총 소요시간(분). ",
+            "직전 AI 예측 총 소요시간(분). "
             "첫 세션 종료 시에는 최초 예측값, 이후에는 직전 updatedAiTotalMinutes를 사용한다. "
-        )
+        ),
     )
 
 

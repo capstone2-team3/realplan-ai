@@ -1,4 +1,4 @@
-"""/predict 엔드포인트 DTO. Java Spring DTO와 1:1 매핑."""
+"""/tasks/estimate 엔드포인트 DTO. Java Spring DTO와 1:1 매핑."""
 
 from __future__ import annotations
 

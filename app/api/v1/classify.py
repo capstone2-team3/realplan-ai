@@ -1,4 +1,4 @@
-"""POST /v1/classify — Task 유형 + splittable 분류."""
+"""POST /v1/tasks/classify — OpenAI 기반 태스크 유형 분류."""
 
 from __future__ import annotations
 
@@ -16,7 +16,12 @@ from app.services.classifier import (
 router = APIRouter()
 
 
-@router.post("/classify", response_model=ApiResponse[ClassifyResponse])
+@router.post(
+    "/tasks/classify",
+    response_model=ApiResponse[ClassifyResponse],
+    summary="OpenAI 기반 태스크 유형 분류",
+    description="저장된 태스크 정보를 받아 태스크 유형과 분할 가능 여부를 계산해 반환한다.",
+)
 def classify(req: ClassifyRequest, request: Request):
     """
     Spring 백엔드는 저장된 태스크 정보를 넘기고, Python은 분류 결과만 계산해 돌려준다.

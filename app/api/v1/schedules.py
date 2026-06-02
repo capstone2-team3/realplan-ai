@@ -1,4 +1,4 @@
-"""POST /v1/schedules/auto-place — 분할된 세션 자동 배치."""
+"""POST /v1/schedules/auto-place — 태스크 세션 자동 배치 계산."""
 
 from __future__ import annotations
 
@@ -11,7 +11,12 @@ from app.services.auto_placement import auto_place_sessions
 router = APIRouter()
 
 
-@router.post("/schedules/auto-place", response_model=ApiResponse[AutoPlacementResponse])
+@router.post(
+    "/schedules/auto-place",
+    response_model=ApiResponse[AutoPlacementResponse],
+    summary="태스크 세션 자동 배치 계산",
+    description="분할된 태스크 세션을 백엔드가 제공한 가용 시간 안에 자동 배치한 계산 결과를 반환한다.",
+)
 def auto_place(req: AutoPlacementRequest, request: Request):
     """OpenAI가 분할한 세션을 백엔드가 제공한 가용 시간 안에만 배치한다.
 

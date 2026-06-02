@@ -1,4 +1,4 @@
-"""POST /v1/predict — 보정된 예상 소요시간 계산."""
+"""POST /v1/tasks/estimate — 태스크 예상 소요시간 산정."""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from app.services.predictor import calculate_prediction
 router = APIRouter()
 
 
-@router.post("/predict", response_model=ApiResponse[PredictResponse])
+@router.post(
+    "/tasks/estimate",
+    response_model=ApiResponse[PredictResponse],
+    summary="태스크 예상 소요시간 산정",
+    description="Spring에서 전달한 계획오류율과 count를 기반으로 태스크의 보정된 예상 소요시간을 계산한다.",
+)
 def predict(req: PredictRequest, request: Request):
     """Spring에서 전달한 계수와 count 기반으로 보정 소요시간을 계산한다."""
     try:

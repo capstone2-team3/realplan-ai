@@ -1,4 +1,4 @@
-"""POST /v1/update — 세션 종료 후 사용자 프로필 갱신."""
+"""POST /v1/users/planning-error-rates — 사용자 계획오류율 갱신값 계산."""
 
 from __future__ import annotations
 
@@ -13,7 +13,12 @@ from app.services.updater import update_coefficients
 router = APIRouter()
 
 
-@router.post("/update", response_model=ApiResponse[UpdateResponse])
+@router.post(
+    "/users/planning-error-rates",
+    response_model=ApiResponse[UpdateResponse],
+    summary="사용자 계획오류율 갱신값 계산",
+    description="완료 태스크 관측값을 기반으로 사용자 계획오류율 갱신 결과를 계산해 반환한다.",
+)
 def update(req: UpdateRequest, request: Request):
     """완료 태스크 관측값으로 보정 계수 갱신 결과만 계산한다."""
     try:

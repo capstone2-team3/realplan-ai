@@ -1,4 +1,4 @@
-"""/update 서비스 진입점 — 보정 계수 업데이트만 담당."""
+"""/users/planning-error-rates 서비스 진입점 — 보정 계수 업데이트 계산만 담당."""
 
 from __future__ import annotations
 

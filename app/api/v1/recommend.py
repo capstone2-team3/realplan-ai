@@ -1,4 +1,4 @@
-"""POST /v1/recommend — 추천받기 단계 태스크 추천."""
+"""POST /v1/tasks/recommend — 특정 날짜의 태스크 추천도 계산."""
 
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ from app.services.scheduler import CandidateTask, RecommendInput, recommend_task
 router = APIRouter()
 
 
-@router.post("/recommend", response_model=ApiResponse[RecommendResponse])
+@router.post(
+    "/tasks/recommend",
+    response_model=ApiResponse[RecommendResponse],
+    summary="특정 날짜의 태스크 추천도 계산",
+    description="요청으로 받은 후보 태스크와 가용 시간을 기준으로 특정 날짜의 추천도와 추천 작업량을 계산한다.",
+)
 def recommend(req: RecommendRequest, request: Request):
     """DB 조회 없이 요청으로 받은 후보 목록만 기준으로 오늘 수행할 태스크를 추천한다."""
     inp = RecommendInput(
