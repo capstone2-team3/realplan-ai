@@ -1,4 +1,4 @@
-"""POST /v1/sessions/estimate — 세션 종료 후 잔여시간 재예측."""
+"""세션 관련 v1 API 라우터."""
 
 from __future__ import annotations
 
@@ -27,7 +27,11 @@ def estimate_session_remaining(req: SessionRemainingRequest, request: Request):
         body = ApiResponse.fail(exc.code, exc.message, request.url.path)
         return JSONResponse(status_code=400, content=body.model_dump())
     except Exception:
-        body = ApiResponse.fail("SESSION_ESTIMATION_FAILED", "세션 잔여시간 계산 중 오류가 발생했습니다.", request.url.path)
+        body = ApiResponse.fail(
+            "SESSION_ESTIMATION_FAILED",
+            "세션 잔여시간 계산 중 오류가 발생했습니다.",
+            request.url.path,
+        )
         return JSONResponse(status_code=500, content=body.model_dump())
 
     return ApiResponse.ok(data=result, path=request.url.path)

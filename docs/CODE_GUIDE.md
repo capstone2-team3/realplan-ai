@@ -42,17 +42,18 @@ app/
 │   ├── exceptions.py      # 전역 예외 핸들러
 │   └── v1/
 │       ├── __init__.py    # v1_router에 각 모듈 라우터 묶음
-│       ├── classify.py    # 분류 핸들러
-│       ├── predict.py     # 예측 핸들러
-│       ├── update.py      # 계수 갱신 핸들러
-│       ├── session.py     # 세션 잔여시간 핸들러
-│       └── recommend.py   # 추천 핸들러
+│       ├── tasks.py       # /tasks/* 핸들러
+│       ├── sessions.py    # /sessions/* 핸들러
+│       ├── users.py       # /users/* 핸들러
+│       └── schedules.py   # /schedules/* 핸들러
 ├── schemas/               # Pydantic DTO (Spring DTO와 1:1 매핑)
 │   ├── classify.py
 │   ├── predict.py
 │   ├── update.py
 │   ├── session.py
-│   └── recommend.py
+│   ├── recommend.py
+│   ├── tasks.py
+│   └── schedules.py
 └── services/              # 순수 계산 로직
     ├── classifier/        # LLM 기반 태스크 유형 분류
     ├── planning_model/    # 계획 오류 보정 모델 (estimate/planning-error-rates)
@@ -80,7 +81,7 @@ tests/services/
 
 ```
 HTTP POST /v1/tasks/estimate
-  └─► api/v1/predict.py             # /tasks/estimate 핸들러, Pydantic 검증
+  └─► api/v1/tasks.py               # /tasks/estimate 핸들러, Pydantic 검증
         └─► services/predictor.py
               └─► planning_model/router.py  # completedCount 기반 단계 선택
                     └─► early_stage.predict()  # (또는 MAIN/INTERACTION)
@@ -93,7 +94,7 @@ HTTP POST /v1/tasks/estimate
 
 ```
 HTTP POST /v1/users/planning-error-rates
-  └─► api/v1/update.py              # /users/planning-error-rates 핸들러
+  └─► api/v1/users.py               # /users/planning-error-rates 핸들러
         └─► services/updater.py
               └─► planning_model/router.py
                     ├─► drop 판정 (ratio 가 [0.1, 8.0] 바깥?)
@@ -105,7 +106,7 @@ HTTP POST /v1/users/planning-error-rates
 
 ```
 HTTP POST /v1/sessions/estimate
-  └─► api/v1/session.py
+  └─► api/v1/sessions.py
         └─► services/session_estimator.estimate_remaining()
               # planning_model과 무관. 사용자 계수 안 씀.
               → SessionRemainingResponse

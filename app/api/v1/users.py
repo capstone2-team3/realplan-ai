@@ -1,4 +1,4 @@
-"""POST /v1/users/planning-error-rates — 사용자 계획오류율 갱신값 계산."""
+"""사용자 관련 v1 API 라우터."""
 
 from __future__ import annotations
 
