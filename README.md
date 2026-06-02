@@ -17,7 +17,7 @@ Swagger UI: http://localhost:8000/docs
 
 | 키 | 설명 | 기본값 |
 |---|---|---|
-| `OPENAI_API_KEY` | OpenAI API 키 (필수, /classify에서 사용) | — |
+| `OPENAI_API_KEY` | OpenAI API 키 (필수, `/v1/tasks/classify`, `/v1/tasks/decompose`에서 사용) | — |
 
 분류용 기본 모델은 `app/services/classifier/constants.py`에서 관리합니다.
 
@@ -28,10 +28,13 @@ Swagger UI: http://localhost:8000/docs
 | Method | Path | 설명 |
 |---|---|---|
 | GET  | `/health`        | 헬스 체크 |
-| POST | `/v1/classify`   | Task 유형 + splittable 분류 |
-| POST | `/v1/predict`    | 보정된 예상 소요시간 계산 |
-| POST | `/v1/update`     | 세션 종료 후 사용자 보정 계수 갱신 |
-| POST | `/v1/recommend`  | 오늘의 학습 조합 추천 (Knapsack) |
+| POST | `/v1/tasks/classify` | OpenAI 기반 태스크 유형 분류 |
+| POST | `/v1/tasks/estimate` | 태스크 예상 소요시간 산정 |
+| POST | `/v1/sessions/estimate` | 세션 종료 후 진행률·집중도 기반 잔여시간 재예측 |
+| POST | `/v1/users/planning-error-rates` | 완료 태스크 기반 사용자 계획오류율 갱신값 계산 |
+| POST | `/v1/tasks/recommend` | 특정 날짜의 태스크 추천도 계산 |
+| POST | `/v1/tasks/decompose` | OpenAI 기반 태스크 세션 분할 |
+| POST | `/v1/schedules/auto-place` | 태스크 세션 자동 배치 계산 |
 
 응답 포맷:
 
