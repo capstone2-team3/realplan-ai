@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from app.schemas.predict import PredictRequest, PredictResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.planning_model.base import PlanningStage
+from app.services.initial_estimator.base import PlanningStage
 
 
 class InteractionStage(PlanningStage):

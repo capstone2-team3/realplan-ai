@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from app.schemas.session import FocusLevel, SessionRemainingRequest, SessionRemainingResponse
-from app.services.planning_model import CalculationError
+from app.services.common import CalculationError
 
 
 # 집중도 보정 가중치. 보통 집중(1.0) 기준 생산성 비율.

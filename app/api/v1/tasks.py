@@ -22,7 +22,7 @@ from app.services.classifier import (
     NoOpPersonalization,
     classify_task,
 )
-from app.services.planning_model import CalculationError
+from app.services.common import CalculationError
 from app.services.predictor import calculate_prediction
 from app.services.scheduler import CandidateTask, RecommendInput, recommend_tasks
 from app.services.task_decomposition import decompose_tasks

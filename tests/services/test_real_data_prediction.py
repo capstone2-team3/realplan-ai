@@ -20,7 +20,7 @@ import pytest
 
 from app.schemas.predict import PredictRequest
 from app.schemas.update import UpdateRequest
-from app.services.planning_model.constants import (
+from app.services.initial_estimator.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
     DROP_RATIO_MAX,
@@ -29,7 +29,7 @@ from app.services.planning_model.constants import (
     ETA_TYPE,
     TYPE_SHRINKAGE_N,
 )
-from app.services.predictor import calculate_prediction
+from app.services.initial_estimator.estimation import calculate_prediction
 from app.services.updater import update_coefficients
 
 

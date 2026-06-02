@@ -11,8 +11,8 @@ import math
 
 from app.schemas.predict import PredictRequest, PredictResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.planning_model.base import CalculationError, PlanningStage
-from app.services.planning_model.constants import (
+from app.services.initial_estimator.base import CalculationError, PlanningStage
+from app.services.initial_estimator.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
     DROP_RATIO_MAX,

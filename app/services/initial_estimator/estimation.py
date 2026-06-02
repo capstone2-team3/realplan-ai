@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.schemas.predict import PredictRequest, PredictResponse
-from app.services.planning_model.router import default_router
+from app.services.initial_estimator.router import default_router
 
 
 def calculate_prediction(req: PredictRequest) -> PredictResponse:

@@ -7,8 +7,8 @@ import math
 
 from app.schemas.predict import PredictRequest, PredictResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.planning_model.base import PlanningStage
-from app.services.planning_model.constants import (
+from app.services.initial_estimator.base import PlanningStage
+from app.services.initial_estimator.constants import (
     BLEND_TRANSITION_WIDTH,
     EARLY_THRESHOLD,
     MAIN_THRESHOLD,
@@ -18,9 +18,9 @@ from app.services.planning_model.constants import (
     STAGE_MAIN,
     STAGE_MAIN_INTERACTION_BLEND,
 )
-from app.services.planning_model.early_stage import EarlyStage
-from app.services.planning_model.interaction_stage import InteractionStage
-from app.services.planning_model.main_stage import MainEffectStage
+from app.services.initial_estimator.early_stage import EarlyStage
+from app.services.initial_estimator.interaction_stage import InteractionStage
+from app.services.initial_estimator.main_stage import MainEffectStage
 
 logger = logging.getLogger(__name__)
 

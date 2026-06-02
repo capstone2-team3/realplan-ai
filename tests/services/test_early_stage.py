@@ -8,7 +8,7 @@ import pytest
 
 from app.schemas.predict import PredictRequest
 from app.schemas.update import UpdateRequest
-from app.services.planning_model.constants import (
+from app.services.initial_estimator.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
     DROP_RATIO_MAX,
@@ -19,8 +19,8 @@ from app.services.planning_model.constants import (
     STAGE_EARLY_MAIN_BLEND,
     TYPE_SHRINKAGE_N,
 )
-from app.services.planning_model.early_stage import EarlyStage
-from app.services.planning_model.router import PlanningRouter, sigmoid_weight
+from app.services.initial_estimator.early_stage import EarlyStage
+from app.services.initial_estimator.router import PlanningRouter, sigmoid_weight
 
 
 SYSTEM_GLOBAL = 0.1
