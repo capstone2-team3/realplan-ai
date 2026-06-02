@@ -29,9 +29,11 @@ class RuleStage(PlanningStage):
             + req.systemTypeEffect.get(req.taskType, 0.0)
             + req.systemDifficultyEffect.get(req.difficulty, 0.0)
         )
+        correction_factor = math.exp(log_correction)
 
         return PredictResponse(
-            predictedMinutes=req.estimatedMinutes * math.exp(log_correction),
+            predictedMinutes=req.estimatedMinutes * correction_factor,
+            correctionFactor=correction_factor,
             logCorrection=log_correction,
             stage=STAGE_RULE,
         )
@@ -49,8 +51,12 @@ class RuleStage(PlanningStage):
             ),
             userTypeResidual=dict(req.userTypeResidual or {}),
             userDifficultyResidual=dict(req.userDifficultyResidual or {}),
+            userFolderResidual=dict(req.userFolderResidual or {}),
             typeCount=dict(req.typeCount or {}),
             difficultyCount=dict(req.difficultyCount or {}),
+            folderCount=dict(req.folderCount or {}),
+            planningErrorRatio=ratio,
+            clampedPlanningErrorRatio=math.exp(clamped_log_ratio),
             logRatio=log_ratio,
             clampedLogRatio=clamped_log_ratio,
             stage=STAGE_RULE,

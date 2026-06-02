@@ -1,8 +1,10 @@
-"""MAIN_EFFECT 단계 초기 소요 시간 예측 모델 스텁.
+"""RIDGE_STUB 단계 초기 소요 시간 예측 모델 스텁.
 
-추후 Ridge 회귀 기반 초기 예측 main-effect 모델을 이 파일에 구현한다.
+추후 Ridge 기반 초기 예측 모델을 이 파일에 구현한다.
+Ridge 입력 feature는 taskType과 difficulty의 일반 패턴을 중심으로 제한하고,
+folder는 전역 feature가 아니라 사용자별 residual로만 다룬다.
 현재는 시그니처만 유지하고 NotImplementedError를 던진다.
-router가 이 예외를 감지해 AVERAGE_BASELINE 결과로 폴백한다.
+router가 이 예외를 감지해 RIDGE_STUB_FALLBACK으로 average 결과를 반환한다.
 """
 
 from __future__ import annotations
@@ -16,8 +18,7 @@ class MainEffectStage(PlanningStage):
     """충분한 완료 기록을 가진 사용자를 위한 Ridge 기반 초기 예측 모델 자리."""
 
     def predict(self, req: PredictRequest) -> PredictResponse:
-        raise NotImplementedError("MAIN_EFFECT stage not yet implemented")
+        raise NotImplementedError("RIDGE_STUB stage not yet implemented")
 
     def update(self, req: UpdateRequest) -> UpdateResponse:
-        # TODO: 회귀 계수 업데이트 전에 early_stage.py와 같은 이상치 Drop 판정을 먼저 적용할 것.
-        raise NotImplementedError("MAIN_EFFECT stage not yet implemented")
+        raise NotImplementedError("RIDGE_STUB stage not yet implemented")

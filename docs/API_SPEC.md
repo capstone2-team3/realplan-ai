@@ -2,6 +2,30 @@
 
 현재 코드 기준 API 명세입니다. 모든 비즈니스 API는 `/v1` prefix를 사용하며, 응답은 공통 래퍼 형식을 따릅니다.
 
+## 엔드포인트 요약
+
+| Method | Path | 설명 | API 라우터 |
+|---|---|---|---|
+| GET | `/health` | 헬스 체크 | `app/main.py` |
+| POST | `/v1/tasks/classify` | OpenAI 기반 태스크 유형 분류 | `app/api/v1/tasks.py` |
+| POST | `/v1/tasks/estimate` | 태스크 예상 소요시간 산정 | `app/api/v1/tasks.py` |
+| POST | `/v1/sessions/estimate` | 세션 종료 후 잔여시간 재예측 | `app/api/v1/sessions.py` |
+| POST | `/v1/users/planning-error-rates` | 사용자 계획오류율 갱신값 계산 | `app/api/v1/users.py` |
+| POST | `/v1/tasks/recommend` | 특정 날짜의 태스크 추천도 계산 | `app/api/v1/tasks.py` |
+| POST | `/v1/tasks/decompose` | OpenAI 기반 태스크 세션 분할 | `app/api/v1/tasks.py` |
+| POST | `/v1/schedules/auto-place` | 태스크 세션 자동 배치 계산 | `app/api/v1/schedules.py` |
+
+## v1 라우터 구성
+
+`app/api/v1` 라우터 파일은 외부 엔드포인트의 도메인 단위와 맞춰 관리합니다.
+
+| 파일 | 담당 경로 |
+|---|---|
+| `tasks.py` | `/tasks/classify`, `/tasks/estimate`, `/tasks/recommend`, `/tasks/decompose` |
+| `sessions.py` | `/sessions/estimate` |
+| `users.py` | `/users/planning-error-rates` |
+| `schedules.py` | `/schedules/auto-place` |
+
 ## 공통 응답 형식
 
 ### 성공

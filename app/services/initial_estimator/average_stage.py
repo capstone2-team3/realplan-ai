@@ -11,8 +11,10 @@ from app.services.initial_estimator.base import PlanningStage
 from app.services.initial_estimator.constants import (
     DIFFICULTY_SHRINKAGE_N,
     ETA_DIFFICULTY,
+    ETA_FOLDER,
     ETA_GLOBAL,
     ETA_TYPE,
+    FOLDER_SHRINKAGE_N,
     STAGE_AVERAGE_BASELINE,
     TYPE_SHRINKAGE_N,
     USER_GLOBAL_SHRINKAGE_N,
@@ -30,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class AverageBaselineStage(PlanningStage):
-    """safe user global, type/difficulty effect, 사용자 residual을 반영하는 baseline."""
+    """safe user global, system effect, 사용자 type/difficulty/folder residual baseline."""
 
     stage_label = STAGE_AVERAGE_BASELINE
 
@@ -64,16 +66,29 @@ class AverageBaselineStage(PlanningStage):
             difficulty_count + DIFFICULTY_SHRINKAGE_N
         )
 
+        folder_residual = 0.0
+        if req.folderId is not None:
+            user_folder_residual = dict(req.userFolderResidual or {}).get(
+                req.folderId,
+                0.0,
+            )
+            folder_count = dict(req.folderCount or {}).get(req.folderId, 0)
+            r_folder = folder_count / (folder_count + FOLDER_SHRINKAGE_N)
+            folder_residual = r_folder * user_folder_residual
+
         log_correction = (
             safe_user_global
             + system_type_effect
             + system_difficulty_effect
             + r_type * user_type_residual
             + r_difficulty * user_difficulty_residual
+            + folder_residual
         )
+        correction_factor = math.exp(log_correction)
 
         return PredictResponse(
-            predictedMinutes=req.estimatedMinutes * math.exp(log_correction),
+            predictedMinutes=req.estimatedMinutes * correction_factor,
+            correctionFactor=correction_factor,
             logCorrection=log_correction,
             stage=self.stage_label,
         )
@@ -88,6 +103,7 @@ class AverageBaselineStage(PlanningStage):
         if dropped:
             return self._drop_response(
                 req,
+                ratio=ratio,
                 log_ratio=log_ratio,
                 clamped_log_ratio=clamped_log_ratio,
                 reason=drop_reason or "dropped by ratio policy",
@@ -134,12 +150,26 @@ class AverageBaselineStage(PlanningStage):
             difficulty_count_map.get(req.difficulty, 0) + 1
         )
 
+        folder_residual_map: dict[str, float] = dict(req.userFolderResidual or {})
+        folder_count_map: dict[str, int] = dict(req.folderCount or {})
+        if req.folderId is not None:
+            folder_residual_old = folder_residual_map.get(req.folderId, 0.0)
+            folder_residual_map[req.folderId] = (
+                (1 - ETA_FOLDER) * folder_residual_old
+                + ETA_FOLDER * residual_target
+            )
+            folder_count_map[req.folderId] = folder_count_map.get(req.folderId, 0) + 1
+
         return UpdateResponse(
             userGlobal=user_global_new,
             userTypeResidual=type_residual_map,
             userDifficultyResidual=difficulty_residual_map,
+            userFolderResidual=folder_residual_map,
             typeCount=type_count_map,
             difficultyCount=difficulty_count_map,
+            folderCount=folder_count_map,
+            planningErrorRatio=ratio,
+            clampedPlanningErrorRatio=math.exp(clamped_log_ratio),
             logRatio=log_ratio,
             clampedLogRatio=clamped_log_ratio,
             stage=self.stage_label,
@@ -151,6 +181,7 @@ class AverageBaselineStage(PlanningStage):
         self,
         req: UpdateRequest,
         *,
+        ratio: float,
         log_ratio: float,
         clamped_log_ratio: float,
         reason: str,
@@ -162,8 +193,12 @@ class AverageBaselineStage(PlanningStage):
             ),
             userTypeResidual=dict(req.userTypeResidual or {}),
             userDifficultyResidual=dict(req.userDifficultyResidual or {}),
+            userFolderResidual=dict(req.userFolderResidual or {}),
             typeCount=dict(req.typeCount or {}),
             difficultyCount=dict(req.difficultyCount or {}),
+            folderCount=dict(req.folderCount or {}),
+            planningErrorRatio=ratio,
+            clampedPlanningErrorRatio=math.exp(clamped_log_ratio),
             logRatio=log_ratio,
             clampedLogRatio=clamped_log_ratio,
             stage=self.stage_label,

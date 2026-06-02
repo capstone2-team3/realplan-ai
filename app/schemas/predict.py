@@ -19,16 +19,18 @@ class PredictRequest(BaseModel):
         default=None,
         description="Legacy unused. 초기 소요 시간 예측 계산에는 사용하지 않음",
     )
-    # TODO: 현재 MAIN/INTERACTION 단계가 스텁이라 계산에 사용되지 않는다.
-    # Java 호출부 호환성을 확인한 뒤 제거하거나, MAIN 단계의 명시적 계산 피처로 구현한다.
+    # TODO: 현재 RIDGE/TREE 단계가 스텁이라 계산에 사용되지 않는다.
+    # Java 호출부 호환성을 확인한 뒤 제거하거나, 사용자 residual 피처로만 유지한다.
     folderId: Optional[str] = Field(default=None, description="폴더 ID. MAIN 단계부터 사용")
 
     # 사용자 개인 계수 (Spring에서 주입, 없으면 신규 사용자)
     userGlobal: Optional[float] = None
     userTypeResidual: Optional[dict[str, float]] = None
     userDifficultyResidual: Optional[dict[str, float]] = None
+    userFolderResidual: Optional[dict[str, float]] = None
     typeCount: Optional[dict[str, int]] = None
     difficultyCount: Optional[dict[str, int]] = None
+    folderCount: Optional[dict[str, int]] = None
 
     # 시스템 prior (Spring에서 주입)
     systemGlobalPrior: float
@@ -42,5 +44,6 @@ class PredictRequest(BaseModel):
 
 class PredictResponse(BaseModel):
     predictedMinutes: float
+    correctionFactor: float
     logCorrection: float
     stage: str

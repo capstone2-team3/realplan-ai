@@ -248,8 +248,10 @@ def test_simulate_predict_update_cycle_per_user():
                 "userGlobal": None,
                 "userTypeResidual": None,
                 "userDifficultyResidual": None,
+                "userFolderResidual": None,
                 "typeCount": None,
                 "difficultyCount": None,
+                "folderCount": None,
             },
         )
         completed = sum(state["typeCount"].values()) if state["typeCount"] else 0
@@ -267,8 +269,10 @@ def test_simulate_predict_update_cycle_per_user():
                 userGlobal=state["userGlobal"],
                 userTypeResidual=state["userTypeResidual"],
                 userDifficultyResidual=state["userDifficultyResidual"],
+                userFolderResidual=state["userFolderResidual"],
                 typeCount=state["typeCount"],
                 difficultyCount=state["difficultyCount"],
+                folderCount=state["folderCount"],
                 systemGlobalPrior=SYSTEM_GLOBAL_PRIOR,
                 systemTypeEffect=SYSTEM_TYPE_EFFECT,
                 systemDifficultyEffect=SYSTEM_DIFFICULTY_EFFECT,
@@ -288,8 +292,10 @@ def test_simulate_predict_update_cycle_per_user():
                 userGlobal=state["userGlobal"],
                 userTypeResidual=state["userTypeResidual"],
                 userDifficultyResidual=state["userDifficultyResidual"],
+                userFolderResidual=state["userFolderResidual"],
                 typeCount=state["typeCount"],
                 difficultyCount=state["difficultyCount"],
+                folderCount=state["folderCount"],
                 systemGlobalPrior=SYSTEM_GLOBAL_PRIOR,
                 systemTypeEffect=SYSTEM_TYPE_EFFECT,
                 systemDifficultyEffect=SYSTEM_DIFFICULTY_EFFECT,
@@ -299,8 +305,10 @@ def test_simulate_predict_update_cycle_per_user():
         state["userGlobal"] = upd.userGlobal
         state["userTypeResidual"] = upd.userTypeResidual
         state["userDifficultyResidual"] = upd.userDifficultyResidual
+        state["userFolderResidual"] = upd.userFolderResidual
         state["typeCount"] = upd.typeCount
         state["difficultyCount"] = upd.difficultyCount
+        state["folderCount"] = upd.folderCount
 
         residual_for_type = upd.userTypeResidual.get(task_type_code, 0.0)
         # 어떤 분기를 탔는지 표시
@@ -327,6 +335,8 @@ def test_simulate_predict_update_cycle_per_user():
         residuals = state["userTypeResidual"] or {}
         difficulty_counts = state["difficultyCount"] or {}
         difficulty_residuals = state["userDifficultyResidual"] or {}
+        folder_counts = state["folderCount"] or {}
+        folder_residuals = state["userFolderResidual"] or {}
         print(f"{user}: userGlobal={state['userGlobal']:+.3f}")
         for type_code, count in type_counts.items():
             res = residuals.get(type_code, 0.0)
@@ -334,6 +344,9 @@ def test_simulate_predict_update_cycle_per_user():
         for difficulty_code, count in difficulty_counts.items():
             res = difficulty_residuals.get(difficulty_code, 0.0)
             print(f"    {difficulty_code:<20} n={count:>2}  residual={res:+.3f}")
+        for folder_code, count in folder_counts.items():
+            res = folder_residuals.get(folder_code, 0.0)
+            print(f"    {folder_code:<20} n={count:>2}  residual={res:+.3f}")
 
 
 # ---------- 유형/난이도별 보정 방향 검증 -------------------------------

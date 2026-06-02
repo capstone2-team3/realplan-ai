@@ -13,14 +13,15 @@ from app.services.initial_estimator.constants import (
     CLAMP_MIN,
     DIFFICULTY_SHRINKAGE_N,
     ETA_DIFFICULTY,
+    ETA_FOLDER,
     DROP_RATIO_MAX,
     DROP_RATIO_MIN,
     ETA_GLOBAL,
     ETA_TYPE,
+    FOLDER_SHRINKAGE_N,
     MAIN_THRESHOLD,
     STAGE_AVERAGE_BASELINE,
-    STAGE_EARLY,
-    STAGE_MAIN_INTERACTION_BLEND,
+    STAGE_MAIN_FALLBACK,
     STAGE_RULE,
     STAGE_RULE_AVERAGE_BLEND,
     TYPE_SHRINKAGE_N,
@@ -29,7 +30,7 @@ from app.services.initial_estimator.constants import (
 )
 from app.services.initial_estimator.average_stage import AverageBaselineStage
 from app.services.initial_estimator.early_stage import EarlyStage
-from app.services.initial_estimator.router import PlanningRouter, sigmoid_weight
+from app.services.initial_estimator.router import PlanningRouter
 from app.services.initial_estimator.rule_stage import RuleStage
 from app.services.initial_estimator.training_record import build_initial_training_record
 
@@ -50,8 +51,10 @@ def _make_predict_request(**overrides):
         userGlobal=None,
         userTypeResidual=None,
         userDifficultyResidual=None,
+        userFolderResidual=None,
         typeCount=None,
         difficultyCount=None,
+        folderCount=None,
         systemGlobalPrior=SYSTEM_GLOBAL,
         systemTypeEffect=SYSTEM_TYPE,
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
@@ -72,8 +75,10 @@ def _make_update_request(**overrides):
         userGlobal=None,
         userTypeResidual=None,
         userDifficultyResidual=None,
+        userFolderResidual=None,
         typeCount=None,
         difficultyCount=None,
+        folderCount=None,
         systemGlobalPrior=SYSTEM_GLOBAL,
         systemTypeEffect=SYSTEM_TYPE,
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
@@ -86,34 +91,38 @@ def _make_update_request(**overrides):
 # ---------- predict ----------------------------------------------------
 
 
-def test_predict_new_user_uses_prior_only():
-    """신규 사용자: userGlobal/typeResidual 없음 → prior + system effect만."""
+def test_early_stage_alias_uses_average_baseline_formula():
+    """EarlyStage legacy alias도 average baseline 공식을 사용한다."""
     stage = EarlyStage()
     req = _make_predict_request(taskType="SATISFACTION", difficulty="HARD")
     result = stage.predict(req)
 
     expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION"] + SYSTEM_DIFFICULTY["HARD"]
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+    assert math.isclose(result.correctionFactor, math.exp(expected_log), rel_tol=1e-9)
     assert math.isclose(
         result.predictedMinutes,
-        60.0 * math.exp(expected_log),
+        60.0 * result.correctionFactor,
         rel_tol=1e-9,
     )
-    assert result.stage == STAGE_EARLY
+    assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_predict_existing_user_applies_residual_with_shrinkage():
-    """기존 사용자: safe_user_global + type/difficulty residual shrinkage 적용."""
+    """기존 사용자: safe_user_global + type/difficulty/folder residual shrinkage 적용."""
     stage = AverageBaselineStage()
     req = _make_predict_request(
         completedCount=30,
         taskType="PROBLEM_SOLVING",
         difficulty="HARD",
+        folderId="folder-1",
         userGlobal=0.2,
         userTypeResidual={"PROBLEM_SOLVING": 0.4},
         userDifficultyResidual={"HARD": 0.3},
+        userFolderResidual={"folder-1": 0.5},
         typeCount={"PROBLEM_SOLVING": 30},
         difficultyCount={"HARD": 20},
+        folderCount={"folder-1": 40},
     )
     result = stage.predict(req)
 
@@ -121,12 +130,14 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
     safe_user_global = user_weight * 0.2 + (1 - user_weight) * SYSTEM_GLOBAL
     r_type = 30 / (30 + TYPE_SHRINKAGE_N)
     r_difficulty = 20 / (20 + DIFFICULTY_SHRINKAGE_N)
+    r_folder = 40 / (40 + FOLDER_SHRINKAGE_N)
     expected_log = (
         safe_user_global
         + SYSTEM_TYPE["PROBLEM_SOLVING"]
         + SYSTEM_DIFFICULTY["HARD"]
         + r_type * 0.4
         + r_difficulty * 0.3
+        + r_folder * 0.5
     )
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
     assert result.stage == STAGE_AVERAGE_BASELINE
@@ -192,6 +203,23 @@ def test_average_stage_ignores_legacy_priority_fields():
     )
 
 
+def test_average_stage_ignores_folder_residual_when_folder_is_missing():
+    stage = AverageBaselineStage()
+    without_folder = stage.predict(
+        _make_predict_request(
+            completedCount=30,
+            folderId=None,
+            userFolderResidual={"folder-1": 99.0},
+            folderCount={"folder-1": 100},
+        )
+    )
+    empty_folder = stage.predict(
+        _make_predict_request(completedCount=30, folderId=None)
+    )
+
+    assert math.isclose(without_folder.logCorrection, empty_folder.logCorrection, rel_tol=1e-9)
+
+
 # ---------- update -----------------------------------------------------
 
 
@@ -203,11 +231,14 @@ def test_update_returns_new_global_and_residual():
         actualMinutes=90.0,
         taskType="SATISFACTION",
         difficulty="NORMAL",
+        folderId="folder-1",
         userGlobal=0.0,
         userTypeResidual={"SATISFACTION": 0.0},
         userDifficultyResidual={"NORMAL": 0.0},
+        userFolderResidual={"folder-1": 0.0},
         typeCount={"SATISFACTION": 5},
         difficultyCount={"NORMAL": 2},
+        folderCount={"folder-1": 4},
     )
     result = stage.update(req)
 
@@ -225,9 +256,19 @@ def test_update_returns_new_global_and_residual():
         (1 - ETA_DIFFICULTY) * 0.0
         + ETA_DIFFICULTY * residual_target
     )
+    expected_folder_residual = (
+        (1 - ETA_FOLDER) * 0.0
+        + ETA_FOLDER * residual_target
+    )
 
     assert math.isclose(result.logRatio, log_ratio, rel_tol=1e-9)
     assert math.isclose(result.clampedLogRatio, clamped, rel_tol=1e-9)
+    assert math.isclose(result.planningErrorRatio, 90.0 / 60.0, rel_tol=1e-9)
+    assert math.isclose(
+        result.clampedPlanningErrorRatio,
+        math.exp(clamped),
+        rel_tol=1e-9,
+    )
     assert math.isclose(result.userGlobal, expected_global, rel_tol=1e-9)
     assert math.isclose(
         result.userTypeResidual["SATISFACTION"], expected_residual, rel_tol=1e-9
@@ -237,8 +278,14 @@ def test_update_returns_new_global_and_residual():
         expected_difficulty_residual,
         rel_tol=1e-9,
     )
+    assert math.isclose(
+        result.userFolderResidual["folder-1"],
+        expected_folder_residual,
+        rel_tol=1e-9,
+    )
     assert result.typeCount["SATISFACTION"] == 6
     assert result.difficultyCount["NORMAL"] == 3
+    assert result.folderCount["folder-1"] == 5
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
@@ -268,6 +315,19 @@ def test_update_residual_target_ignores_legacy_priority_fields():
         low_result.userDifficultyResidual["NORMAL"],
         rel_tol=1e-9,
     )
+
+
+def test_update_without_folder_id_preserves_folder_maps():
+    stage = AverageBaselineStage()
+    req = _make_update_request(
+        folderId=None,
+        userFolderResidual={"folder-1": 0.2},
+        folderCount={"folder-1": 3},
+    )
+    result = stage.update(req)
+
+    assert result.userFolderResidual == {"folder-1": 0.2}
+    assert result.folderCount == {"folder-1": 3}
 
 
 def test_update_clamps_upper_bound():
@@ -357,6 +417,8 @@ def test_update_above_upper_drop_threshold_is_dropped():
     # logRatio는 그대로 보고, clampedLogRatio는 참고용 상한값
     assert math.isclose(result.logRatio, math.log(8.01), rel_tol=1e-9)
     assert math.isclose(result.clampedLogRatio, CLAMP_MAX, rel_tol=1e-9)
+    assert math.isclose(result.planningErrorRatio, 8.01, rel_tol=1e-9)
+    assert math.isclose(result.clampedPlanningErrorRatio, math.exp(CLAMP_MAX), rel_tol=1e-9)
 
 
 def test_update_lower_boundary_is_not_dropped():
@@ -414,8 +476,10 @@ def test_drop_new_user_uses_system_prior_for_user_global():
     assert result.userGlobal == SYSTEM_GLOBAL
     assert result.userTypeResidual == {}
     assert result.userDifficultyResidual == {}
+    assert result.userFolderResidual == {}
     assert result.typeCount == {}
     assert result.difficultyCount == {}
+    assert result.folderCount == {}
 
 
 def test_drop_constants_are_aligned_with_clamp():
@@ -427,10 +491,10 @@ def test_drop_constants_are_aligned_with_clamp():
 # ---------- router & soft blending -------------------------------------
 
 
-def test_early_stage_wrapper_keeps_early_stage_label():
+def test_early_stage_wrapper_uses_average_stage_label():
     stage = EarlyStage()
     result = stage.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
-    assert result.stage == STAGE_EARLY
+    assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_router_completed_zero_returns_rule():
@@ -454,9 +518,10 @@ def test_router_low_count_returns_rule_average_blend():
 
     assert result.stage == STAGE_RULE_AVERAGE_BLEND
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
+    assert math.isclose(result.correctionFactor, math.exp(expected_log), rel_tol=1e-9)
     assert math.isclose(
         result.predictedMinutes,
-        req.estimatedMinutes * math.exp(expected_log),
+        req.estimatedMinutes * result.correctionFactor,
         rel_tol=1e-9,
     )
 
@@ -468,71 +533,19 @@ def test_router_average_window_returns_average():
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
-def test_sigmoid_weight_monotonic_and_centered():
-    """sigmoid_weight는 threshold에서 0.5, 단조증가."""
-    assert math.isclose(sigmoid_weight(50, 50), 0.5, rel_tol=1e-9)
-    assert sigmoid_weight(40, 50) < 0.5
-    assert sigmoid_weight(60, 50) > 0.5
-    # 두 weight의 합 (w_a + w_b) = 1 보장
-    w_b = sigmoid_weight(55, 50)
-    assert math.isclose(w_b + (1 - w_b), 1.0, rel_tol=1e-12)
-
-
-def test_main_interaction_blend_label_used_when_both_stages_available(monkeypatch):
-    """MAIN/INTERACTION 가짜 구현으로 패치하면 log 공간 blending이 적용된다."""
-    from app.schemas.predict import PredictResponse
-
+def test_router_main_stub_falls_back_to_average_with_fallback_stage():
+    """MAIN_THRESHOLD 이상이면 Ridge stub을 시도하고 average 결과로 폴백한다."""
     router = PlanningRouter()
-
-    def fake_main_predict(req):
-        return PredictResponse(
-            predictedMinutes=req.estimatedMinutes,
-            logCorrection=0.0,
-            stage="MAIN_EFFECT",
-        )
-
-    def fake_interaction_predict(req):
-        return PredictResponse(
-            predictedMinutes=req.estimatedMinutes * math.exp(0.4),
-            logCorrection=0.4,
-            stage="INTERACTION",
-        )
-
-    monkeypatch.setattr(router.main, "predict", fake_main_predict)
-    monkeypatch.setattr(router.interaction, "predict", fake_interaction_predict)
-
-    req = _make_predict_request(completedCount=MAIN_THRESHOLD + 5)
+    req = _make_predict_request(completedCount=MAIN_THRESHOLD)
     result = router.predict(req)
-    assert result.stage == STAGE_MAIN_INTERACTION_BLEND
-    w_b = sigmoid_weight(req.completedCount, MAIN_THRESHOLD)
-    expected_log = w_b * 0.4
-    assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
-    assert math.isclose(
-        result.predictedMinutes,
-        req.estimatedMinutes * math.exp(expected_log),
-        rel_tol=1e-9,
-    )
+    average = router.average.predict(req)
 
-    result_average = router.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
-    assert result_average.stage == STAGE_AVERAGE_BASELINE
+    assert result.stage == STAGE_MAIN_FALLBACK
+    assert math.isclose(result.logCorrection, average.logCorrection, rel_tol=1e-9)
 
 
-def test_router_interaction_only_window_falls_back_to_early():
-    """INTERACTION과 MAIN이 모두 스텁이어도 AVERAGE 결과로 폴백한다."""
-    router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=120))
-    assert result.stage == STAGE_AVERAGE_BASELINE
-
-
-def test_router_main_interaction_blend_window_falls_back_to_early():
-    """MAIN→INTERACTION 전환 구간에서 MAIN 스텁이면 AVERAGE 결과로 폴백한다."""
-    router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=105))
-    assert result.stage == STAGE_AVERAGE_BASELINE
-
-
-def test_router_update_falls_back_when_main_stub(caplog):
-    """MAIN 이상 구간에서 MAIN.update가 스텁이면 AVERAGE로 폴백."""
+def test_router_update_always_uses_average_stage():
+    """update는 completedCount와 무관하게 average.update만 사용한다."""
     router = PlanningRouter()
     req = _make_update_request(completedCount=120)
     result = router.update(req)
@@ -546,8 +559,11 @@ def test_training_record_contains_update_snapshot():
         userGlobal=0.2,
         userTypeResidual={"SATISFACTION": 0.1},
         userDifficultyResidual={"NORMAL": -0.1},
+        userFolderResidual={"folder-1": 0.3},
         typeCount={"SATISFACTION": 3},
         difficultyCount={"NORMAL": 2},
+        folderCount={"folder-1": 4},
+        folderId="folder-1",
     )
     record = build_initial_training_record(
         req=req,
@@ -555,14 +571,38 @@ def test_training_record_contains_update_snapshot():
         user_id=22,
         predicted_minutes=70.0,
         predicted_log_correction=0.2,
+        model_stage=STAGE_AVERAGE_BASELINE,
         model_version="test",
     )
 
     assert record["task_id"] == 11
     assert record["user_id"] == 22
     assert record["task_type"] == "SATISFACTION"
+    assert record["folder_id"] == "folder-1"
+    assert math.isclose(record["planning_error_ratio"], 90.0 / 60.0, rel_tol=1e-9)
+    assert math.isclose(
+        record["log_planning_error_ratio"],
+        math.log(90.0 / 60.0),
+        rel_tol=1e-9,
+    )
+    assert math.isclose(
+        record["clamped_log_planning_error_ratio"],
+        record["clamped_log_ratio"],
+        rel_tol=1e-9,
+    )
+    assert math.isclose(
+        record["clamped_planning_error_ratio"],
+        math.exp(record["clamped_log_planning_error_ratio"]),
+        rel_tol=1e-9,
+    )
+    assert math.isclose(record["correction_factor"], math.exp(0.2), rel_tol=1e-9)
     assert record["user_difficulty_residual_at_prediction"] == {"NORMAL": -0.1}
+    assert record["user_folder_residual_at_prediction"] == {"folder-1": 0.3}
     assert record["difficulty_count_at_prediction"] == {"NORMAL": 2}
+    assert record["folder_count_at_prediction"] == {"folder-1": 4}
+    assert record["dropped"] is False
+    assert record["drop_reason"] is None
+    assert record["model_stage"] == STAGE_AVERAGE_BASELINE
     assert "priority" not in record
     assert "system_priority_effect_at_prediction" not in record
     assert record["model_version"] == "test"
