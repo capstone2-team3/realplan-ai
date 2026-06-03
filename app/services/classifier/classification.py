@@ -68,7 +68,6 @@ def classify_task(
         if matched is not None:
             return ClassifyOutput(
                 task_type=matched,
-                splittable=_default_splittable(matched),
                 reason="과거 유사 Task의 분류를 따름 (일관성 유지)",
                 source="history_match",
             )
@@ -96,7 +95,6 @@ def classify_task(
         task_type = TaskType(data["task_type"])
         return ClassifyOutput(
             task_type=task_type,
-            splittable=bool(data.get("splittable", _default_splittable(task_type))),
             reason=str(data.get("reason", "")),
             source="llm",
         )
@@ -104,17 +102,10 @@ def classify_task(
         return _fallback(reason=f"파싱 실패: {e}")
 
 
-def _default_splittable(task_type: TaskType) -> bool:
-    """history_match나 파싱 실패 시 사용하는 보수적 기본값.
-    시간형은 짧은 활동이 많아 분할 불가, 나머지는 분할 가능으로 가정."""
-    return task_type != TaskType.TIME_BOUND
-
-
 def _fallback(reason: str) -> ClassifyOutput:
     """LLM 호출 실패 시 보수적 기본값. 가장 보정을 많이 해주는 만족형으로 폴백."""
     return ClassifyOutput(
         task_type=TaskType.SATISFACTION_BOUND,
-        splittable=True,
         reason=f"[fallback] {reason}",
         source="fallback",
     )

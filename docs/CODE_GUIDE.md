@@ -265,7 +265,7 @@ Step 4. rawRemaining = updatedAiTotal - elapsed
 
 ### 4.5 `app/services/classifier/`
 
-LLM(OpenAI) 기반 태스크 유형 + splittable 분류. 계획오류율 estimate와는 독립.
+LLM(OpenAI) 기반 태스크 유형 분류. 계획오류율 estimate와는 독립.
 구조는 `core.py`, `prompts.py`, `personalization.py`, `types.py`, `constants.py`로 분리되어 있다. 자세한 내용은 해당 파일 docstring 참고.
 
 ### 4.6 `app/services/scheduler/`

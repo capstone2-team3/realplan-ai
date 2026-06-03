@@ -34,7 +34,7 @@ router = APIRouter()
     "/tasks/classify",
     response_model=ApiResponse[ClassifyResponse],
     summary="OpenAI 기반 태스크 유형 분류",
-    description="저장된 태스크 정보를 받아 태스크 유형과 분할 가능 여부를 계산해 반환한다.",
+    description="저장된 태스크 정보를 받아 태스크 유형을 계산해 반환한다.",
 )
 def classify(req: ClassifyRequest, request: Request):
     """Spring에서 받은 태스크 정보를 기반으로 분류 결과만 계산한다."""
@@ -59,7 +59,6 @@ def classify(req: ClassifyRequest, request: Request):
     return ApiResponse.ok(
         data=ClassifyResponse(
             task_type=result.task_type,
-            splittable=result.splittable,
             reason=result.reason,
             source=result.source,
         ),

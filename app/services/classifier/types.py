@@ -32,6 +32,5 @@ class ClassifyInput:
 class ClassifyOutput:
     """분류기 출력. Backend가 그대로 DB에 저장 가능한 형태."""
     task_type: TaskType
-    splittable: bool
     reason: str
     source: str = "llm"  # "llm" | "history_match" | "fallback"

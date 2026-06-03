@@ -25,6 +25,5 @@ class ClassifyRequest(BaseModel):
 
 class ClassifyResponse(BaseModel):
     task_type: TaskType
-    splittable: bool
     reason: str
     source: str
