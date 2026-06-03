@@ -79,6 +79,27 @@ def test_single_session_is_placed_continuously():
     assert response.summary.scheduledMinutes == 60
 
 
+def test_auto_place_rounds_raw_session_minutes_up_to_slot_unit():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(start="09:00", end="09:30"),
+        ],
+        focusTimeSlots=[
+            dict(start="09:00", end="09:30", focusScore=80),
+        ],
+        tasks=[_task(1, 20)],
+        taskSessions=[_session(1, 20)],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(taskId=1, start="09:00", end="09:30")
+    ]
+    assert response.summary.scheduledMinutes == 30
+    assert response.summary.unscheduledMinutes == 0
+
+
 def test_session_falls_back_to_atomic_chunks_when_continuous_position_is_missing():
     req = _request(
         schedulableTimeBlocks=[

@@ -17,11 +17,11 @@ class TaskDecompositionItem(BaseModel):
     title: str = Field(..., description="태스크명")
     taskType: TaskType = Field(..., description="태스크 유형")
     difficulty: TaskDifficulty = Field(..., description="태스크 난이도")
-    targetMinutes: int = Field(..., description="분할해야 하는 총 시간")
+    targetMinutes: int = Field(..., description="분할해야 하는 raw 총 시간")
 
 
 class TaskDecompositionRequest(BaseModel):
-    slotUnitMinutes: int = Field(..., description="세션 최소 단위. MVP에서는 30")
+    slotUnitMinutes: int = Field(..., description="자동 배치 단위. MVP에서는 30")
     maxContinuousSchedulableMinutes: int = Field(..., description="가장 긴 연속 배치 가능 시간")
     tasks: list[TaskDecompositionItem] = Field(..., description="분할할 태스크 목록")
 

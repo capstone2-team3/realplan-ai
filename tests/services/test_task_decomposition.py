@@ -84,6 +84,24 @@ def test_fallback_target_30_returns_single_session():
     assert response.taskSessions[0].requiredFocusLevel == "LOW"
 
 
+def test_fallback_preserves_raw_target_minutes():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=1,
+                title="짧은 복습",
+                taskType="TIME_BASED",
+                difficulty="LOW",
+                targetMinutes=20,
+            )
+        ]
+    )
+
+    response = fallback_decompose(req)
+
+    assert _minutes(response) == [20]
+
+
 @pytest.mark.parametrize(
     "target_minutes,expected",
     [

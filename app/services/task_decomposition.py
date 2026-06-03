@@ -56,13 +56,13 @@ SESSION LENGTH RULES
 1. Decompose each task based on its targetMinutes.
 2. sessionMinutes represents the length of one decomposed session.
 3. For each task, the sum of sessionMinutes must exactly equal that task's targetMinutes.
-4. Every sessionMinutes must be a multiple of slotUnitMinutes.
-5. In MVP, slotUnitMinutes is 30.
-6. Minimum sessionMinutes is 30.
-7. Preferred session lengths are 30, 60, and 90 minutes.
+4. sessionMinutes may be a raw minute value and does not have to be a multiple of slotUnitMinutes.
+5. In MVP, slotUnitMinutes is 30 and the scheduler will round sessions up before placement.
+6. Minimum sessionMinutes is 1.
+7. Preferred session lengths are around 30, 60, and 90 minutes when natural.
 8. Never create a session longer than maxContinuousSchedulableMinutes.
 9. If targetMinutes is greater than maxContinuousSchedulableMinutes, split it into multiple sessions, each no longer than maxContinuousSchedulableMinutes.
-10. If targetMinutes is 30, return exactly one 30-minute session.
+10. If targetMinutes is less than 30, return exactly one session with that raw targetMinutes value.
 11. If targetMinutes is 60, return either one 60-minute session or two 30-minute sessions only when the task naturally has two distinct phases.
 
 FOCUS LEVEL RULES
@@ -125,8 +125,8 @@ SELF-CHECK BEFORE RESPONDING
 Before returning the JSON, verify internally:
 
 1. Every taskId exists in the input.
-2. Every sessionMinutes is at least 30.
-3. Every sessionMinutes is a multiple of slotUnitMinutes.
+2. Every sessionMinutes is greater than 0.
+3. sessionMinutes may be raw minutes and does not have to be a multiple of slotUnitMinutes.
 4. Every sessionMinutes is less than or equal to maxContinuousSchedulableMinutes.
 5. For each task, the sum of sessionMinutes equals targetMinutes exactly.
 6. Every requiredFocusLevel is one of HIGH, MEDIUM, LOW, FLEXIBLE.
@@ -154,8 +154,7 @@ TASK_DECOMPOSITION_JSON_SCHEMA = {
                         "taskId": {"type": "integer"},
                         "sessionMinutes": {
                             "type": "integer",
-                            "minimum": 30,
-                            "multipleOf": 30,
+                            "minimum": 1,
                         },
                         "requiredFocusLevel": {
                             "type": "string",
@@ -274,10 +273,6 @@ def validate_request(request: TaskDecompositionRequest) -> None:
             raise ValueError(f"taskId={task.taskId}의 title은 비어 있을 수 없습니다.")
         if task.targetMinutes <= 0:
             raise ValueError(f"taskId={task.taskId}의 targetMinutes는 0보다 커야 합니다.")
-        if task.targetMinutes % slot_unit != 0:
-            raise ValueError(f"taskId={task.taskId}의 targetMinutes는 slotUnitMinutes의 배수여야 합니다.")
-        if task.targetMinutes < slot_unit:
-            raise ValueError(f"taskId={task.taskId}의 targetMinutes는 slotUnitMinutes 이상이어야 합니다.")
 
 
 def validate_decomposition_response(
@@ -299,10 +294,8 @@ def validate_decomposition_response(
     for session in response.taskSessions:
         if session.taskId not in task_ids:
             raise ValueError(f"입력에 없는 taskId입니다: {session.taskId}")
-        if session.sessionMinutes < request.slotUnitMinutes:
-            raise ValueError(f"sessionMinutes가 slotUnitMinutes보다 작습니다: {session.sessionMinutes}")
-        if session.sessionMinutes % request.slotUnitMinutes != 0:
-            raise ValueError(f"sessionMinutes가 slotUnitMinutes의 배수가 아닙니다: {session.sessionMinutes}")
+        if session.sessionMinutes <= 0:
+            raise ValueError(f"sessionMinutes는 0보다 커야 합니다: {session.sessionMinutes}")
         if session.sessionMinutes > request.maxContinuousSchedulableMinutes:
             raise ValueError(
                 "sessionMinutes가 maxContinuousSchedulableMinutes를 초과했습니다: "
@@ -330,8 +323,14 @@ def _fallback_session_minutes(target_minutes: int, max_continuous_minutes: int) 
     OpenAI가 실패해도 자동 배치가 계속 동작하도록 예측 가능한 세션 길이를 만든다.
     """
 
-    if max_continuous_minutes == 30:
-        return [30] * (target_minutes // 30)
+    if max_continuous_minutes <= 30:
+        sessions: list[int] = []
+        remaining = target_minutes
+        while remaining > 0:
+            minutes = min(30, remaining)
+            sessions.append(minutes)
+            remaining -= minutes
+        return sessions
 
     if target_minutes <= 60:
         return [target_minutes]
@@ -360,6 +359,7 @@ def fallback_decompose(request: TaskDecompositionRequest) -> TaskDecompositionRe
     난이도 기반 집중도만 사용하므로 품질은 단순하지만, API 응답 불능 상태를 피할 수 있다.
     """
 
+    validate_request(request)
     sessions: list[TaskSession] = []
     for task in request.tasks:
         focus_level = DIFFICULTY_FOCUS_MAP[task.difficulty]

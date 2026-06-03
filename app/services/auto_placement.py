@@ -103,10 +103,8 @@ def validate_auto_placement_request(request: AutoPlacementRequest) -> None:
     for session in request.taskSessions:
         if session.taskId not in task_map:
             raise ValueError(f"taskSessions에 입력 tasks에 없는 taskId가 있습니다: {session.taskId}")
-        if session.sessionMinutes < slot_unit:
-            raise ValueError(f"sessionMinutes는 {slot_unit} 이상이어야 합니다.")
-        if session.sessionMinutes % slot_unit != 0:
-            raise ValueError("sessionMinutes는 slotUnitMinutes의 배수여야 합니다.")
+        if session.sessionMinutes <= 0:
+            raise ValueError("sessionMinutes는 0보다 커야 합니다.")
         if session.requiredFocusLevel not in ALLOWED_FOCUS_LEVELS:
             raise ValueError(f"허용되지 않은 requiredFocusLevel입니다: {session.requiredFocusLevel}")
         session_sums[session.taskId] += session.sessionMinutes
@@ -114,13 +112,41 @@ def validate_auto_placement_request(request: AutoPlacementRequest) -> None:
     for task in request.tasks:
         if task.targetMinutes <= 0:
             raise ValueError(f"taskId={task.taskId}의 targetMinutes는 0보다 커야 합니다.")
-        if task.targetMinutes % slot_unit != 0:
-            raise ValueError(f"taskId={task.taskId}의 targetMinutes는 slotUnitMinutes의 배수여야 합니다.")
         if session_sums[task.taskId] != task.targetMinutes:
             raise ValueError(
                 f"taskId={task.taskId}의 taskSessions 합계가 targetMinutes와 다릅니다: "
                 f"{session_sums[task.taskId]} != {task.targetMinutes}"
             )
+
+
+def normalize_for_slot_placement(request: AutoPlacementRequest) -> AutoPlacementRequest:
+    """자동 배치 직전에 raw 세션 시간을 slotUnitMinutes 단위로 올림한다."""
+
+    slot_unit = request.slotUnitMinutes
+    rounded_sessions = [
+        session.model_copy(
+            update={
+                "sessionMinutes": _ceil_to_unit(session.sessionMinutes, slot_unit),
+            }
+        )
+        for session in request.taskSessions
+    ]
+
+    rounded_sums: dict[int, int] = defaultdict(int)
+    for session in rounded_sessions:
+        rounded_sums[session.taskId] += session.sessionMinutes
+
+    rounded_tasks = [
+        task.model_copy(update={"targetMinutes": rounded_sums[task.taskId]})
+        for task in request.tasks
+    ]
+
+    return request.model_copy(
+        update={
+            "tasks": rounded_tasks,
+            "taskSessions": rounded_sessions,
+        }
+    )
 
 
 def _validate_schedulable_blocks(blocks: list[TimeBlock], slot_unit_minutes: int) -> None:
@@ -557,6 +583,7 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
     """
 
     validate_auto_placement_request(request)
+    request = normalize_for_slot_placement(request)
     max_continuous_minutes = (
         request.maxContinuousSchedulableMinutes
         or MAX_CONTINUOUS_SCHEDULABLE_MINUTES
@@ -633,3 +660,7 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
         max_continuous_minutes=max_continuous_minutes,
     )
     return response
+
+
+def _ceil_to_unit(minutes: int, unit: int) -> int:
+    return ((minutes + unit - 1) // unit) * unit
