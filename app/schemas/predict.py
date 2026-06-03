@@ -14,7 +14,7 @@ class PredictRequest(BaseModel):
         ...,
         description="태스크 유형 (예: TIME_BASED / QUANTITY_BASED / SATISFACTION_BASED)",
     )
-    difficulty: str = Field(..., description="난이도 (예: EASY / NORMAL / HARD)")
+    difficulty: str = Field(..., description="난이도 (예: LOW / MEDIUM / HIGH / UNKNOWN)")
     priority: Optional[str] = Field(
         default=None,
         description="Legacy unused. 초기 소요 시간 예측 계산에는 사용하지 않음",

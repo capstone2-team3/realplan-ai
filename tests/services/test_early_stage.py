@@ -37,7 +37,7 @@ from app.services.initial_estimator.training_record import build_initial_trainin
 
 SYSTEM_GLOBAL = 0.1
 SYSTEM_TYPE = {"SATISFACTION_BASED": 0.05, "PROBLEM_SOLVING": -0.02}
-SYSTEM_DIFFICULTY = {"EASY": -0.03, "NORMAL": 0.0, "HARD": 0.08}
+SYSTEM_DIFFICULTY = {"LOW": -0.03, "MEDIUM": 0.0, "HIGH": 0.08}
 SYSTEM_PRIORITY = {"HIGH": 0.07, "LOW": -0.04}
 
 
@@ -46,7 +46,7 @@ def _make_predict_request(**overrides):
         estimatedMinutes=60.0,
         completedCount=0,
         taskType="SATISFACTION_BASED",
-        difficulty="NORMAL",
+        difficulty="MEDIUM",
         folderId=None,
         userGlobal=None,
         userTypeResidual=None,
@@ -70,7 +70,7 @@ def _make_update_request(**overrides):
         actualMinutes=90.0,
         completedCount=0,
         taskType="SATISFACTION_BASED",
-        difficulty="NORMAL",
+        difficulty="MEDIUM",
         folderId=None,
         userGlobal=None,
         userTypeResidual=None,
@@ -94,10 +94,10 @@ def _make_update_request(**overrides):
 def test_early_stage_alias_uses_average_baseline_formula():
     """EarlyStage legacy alias도 average baseline 공식을 사용한다."""
     stage = EarlyStage()
-    req = _make_predict_request(taskType="SATISFACTION_BASED", difficulty="HARD")
+    req = _make_predict_request(taskType="SATISFACTION_BASED", difficulty="HIGH")
     result = stage.predict(req)
 
-    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION_BASED"] + SYSTEM_DIFFICULTY["HARD"]
+    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION_BASED"] + SYSTEM_DIFFICULTY["HIGH"]
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
     assert math.isclose(result.correctionFactor, math.exp(expected_log), rel_tol=1e-9)
     assert math.isclose(
@@ -114,14 +114,14 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
     req = _make_predict_request(
         completedCount=30,
         taskType="PROBLEM_SOLVING",
-        difficulty="HARD",
+        difficulty="HIGH",
         folderId="folder-1",
         userGlobal=0.2,
         userTypeResidual={"PROBLEM_SOLVING": 0.4},
-        userDifficultyResidual={"HARD": 0.3},
+        userDifficultyResidual={"HIGH": 0.3},
         userFolderResidual={"folder-1": 0.5},
         typeCount={"PROBLEM_SOLVING": 30},
-        difficultyCount={"HARD": 20},
+        difficultyCount={"HIGH": 20},
         folderCount={"folder-1": 40},
     )
     result = stage.predict(req)
@@ -134,7 +134,7 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
     expected_log = (
         safe_user_global
         + SYSTEM_TYPE["PROBLEM_SOLVING"]
-        + SYSTEM_DIFFICULTY["HARD"]
+        + SYSTEM_DIFFICULTY["HIGH"]
         + r_type * 0.4
         + r_difficulty * 0.3
         + r_folder * 0.5
@@ -230,14 +230,14 @@ def test_update_returns_new_global_and_residual():
         estimatedMinutes=60.0,
         actualMinutes=90.0,
         taskType="SATISFACTION_BASED",
-        difficulty="NORMAL",
+        difficulty="MEDIUM",
         folderId="folder-1",
         userGlobal=0.0,
         userTypeResidual={"SATISFACTION_BASED": 0.0},
-        userDifficultyResidual={"NORMAL": 0.0},
+        userDifficultyResidual={"MEDIUM": 0.0},
         userFolderResidual={"folder-1": 0.0},
         typeCount={"SATISFACTION_BASED": 5},
-        difficultyCount={"NORMAL": 2},
+        difficultyCount={"MEDIUM": 2},
         folderCount={"folder-1": 4},
     )
     result = stage.update(req)
@@ -249,7 +249,7 @@ def test_update_returns_new_global_and_residual():
         clamped
         - 0.0
         - SYSTEM_TYPE["SATISFACTION_BASED"]
-        - SYSTEM_DIFFICULTY["NORMAL"]
+        - SYSTEM_DIFFICULTY["MEDIUM"]
     )
     expected_residual = (1 - ETA_TYPE) * 0.0 + ETA_TYPE * residual_target
     expected_difficulty_residual = (
@@ -274,7 +274,7 @@ def test_update_returns_new_global_and_residual():
         result.userTypeResidual["SATISFACTION_BASED"], expected_residual, rel_tol=1e-9
     )
     assert math.isclose(
-        result.userDifficultyResidual["NORMAL"],
+        result.userDifficultyResidual["MEDIUM"],
         expected_difficulty_residual,
         rel_tol=1e-9,
     )
@@ -284,7 +284,7 @@ def test_update_returns_new_global_and_residual():
         rel_tol=1e-9,
     )
     assert result.typeCount["SATISFACTION_BASED"] == 6
-    assert result.difficultyCount["NORMAL"] == 3
+    assert result.difficultyCount["MEDIUM"] == 3
     assert result.folderCount["folder-1"] == 5
     assert result.stage == STAGE_AVERAGE_BASELINE
 
@@ -295,10 +295,10 @@ def test_update_residual_target_ignores_legacy_priority_fields():
         estimatedMinutes=60.0,
         actualMinutes=90.0,
         taskType="SATISFACTION_BASED",
-        difficulty="NORMAL",
+        difficulty="MEDIUM",
         userGlobal=0.0,
         userTypeResidual={"SATISFACTION_BASED": 0.0},
-        userDifficultyResidual={"NORMAL": 0.0},
+        userDifficultyResidual={"MEDIUM": 0.0},
         systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
     )
 
@@ -311,8 +311,8 @@ def test_update_residual_target_ignores_legacy_priority_fields():
         rel_tol=1e-9,
     )
     assert math.isclose(
-        high_result.userDifficultyResidual["NORMAL"],
-        low_result.userDifficultyResidual["NORMAL"],
+        high_result.userDifficultyResidual["MEDIUM"],
+        low_result.userDifficultyResidual["MEDIUM"],
         rel_tol=1e-9,
     )
 
@@ -551,17 +551,17 @@ def test_router_update_always_uses_average_stage():
     result = router.update(req)
     assert result.stage == STAGE_AVERAGE_BASELINE
     assert result.typeCount["SATISFACTION_BASED"] == 1
-    assert result.difficultyCount["NORMAL"] == 1
+    assert result.difficultyCount["MEDIUM"] == 1
 
 
 def test_training_record_contains_update_snapshot():
     req = _make_update_request(
         userGlobal=0.2,
         userTypeResidual={"SATISFACTION_BASED": 0.1},
-        userDifficultyResidual={"NORMAL": -0.1},
+        userDifficultyResidual={"MEDIUM": -0.1},
         userFolderResidual={"folder-1": 0.3},
         typeCount={"SATISFACTION_BASED": 3},
-        difficultyCount={"NORMAL": 2},
+        difficultyCount={"MEDIUM": 2},
         folderCount={"folder-1": 4},
         folderId="folder-1",
     )
@@ -596,9 +596,9 @@ def test_training_record_contains_update_snapshot():
         rel_tol=1e-9,
     )
     assert math.isclose(record["correction_factor"], math.exp(0.2), rel_tol=1e-9)
-    assert record["user_difficulty_residual_at_prediction"] == {"NORMAL": -0.1}
+    assert record["user_difficulty_residual_at_prediction"] == {"MEDIUM": -0.1}
     assert record["user_folder_residual_at_prediction"] == {"folder-1": 0.3}
-    assert record["difficulty_count_at_prediction"] == {"NORMAL": 2}
+    assert record["difficulty_count_at_prediction"] == {"MEDIUM": 2}
     assert record["folder_count_at_prediction"] == {"folder-1": 4}
     assert record["dropped"] is False
     assert record["drop_reason"] is None

@@ -86,9 +86,9 @@ TASK_TYPE_MAP = {
 
 # '모름'은 systemDifficultyEffect에 키가 없도록 두어 effect=0으로 fallback시킨다.
 DIFFICULTY_MAP = {
-    "하": "EASY",
-    "중": "NORMAL",
-    "상": "HARD",
+    "하": "LOW",
+    "중": "MEDIUM",
+    "상": "HIGH",
     "모름": "UNKNOWN",
 }
 
@@ -103,9 +103,9 @@ SYSTEM_TYPE_EFFECT = {
     "TIME_BASED":     -0.10,   # 마감 강제력으로 시간 안에 끝남
 }
 SYSTEM_DIFFICULTY_EFFECT = {
-    "EASY":   -0.10,
-    "NORMAL":  0.00,
-    "HARD":   +0.15,
+    "LOW":   -0.10,
+    "MEDIUM":  0.00,
+    "HIGH":   +0.15,
     # "UNKNOWN"은 의도적으로 미정의 → .get(key, 0.0)으로 0 fallback
 }
 
