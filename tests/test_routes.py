@@ -112,8 +112,7 @@ def test_invalid_task_status_is_rejected():
         "/tasks/recommend",
         json={
             "targetDate": "2026-05-29",
-            "availableStart": "09:00",
-            "availableEnd": "12:00",
+            "availableMinutes": 180,
             "tasks": [
                 {
                     "taskId": 1,

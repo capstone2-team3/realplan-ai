@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,8 +35,7 @@ class RecommendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     targetDate: date
-    availableStart: time
-    availableEnd: time
+    availableMinutes: int = Field(..., gt=0, le=1260)
     tasks: list[RecommendCandidateDTO] = Field(default_factory=list)
 
 
@@ -58,8 +57,6 @@ class RecommendedTaskDTO(BaseModel):
 
 class RecommendResponse(BaseModel):
     targetDate: date
-    availableStart: str
-    availableEnd: str
     availableMinutes: int
     totalRecommendedMinutes: int
     recommendations: list[RecommendedTaskDTO]

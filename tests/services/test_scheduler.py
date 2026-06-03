@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date
 
 import pytest
 
@@ -36,12 +36,11 @@ def _task(
     )
 
 
-def _recommend(tasks: list[CandidateTask], start: time = time(9), end: time = time(12)):
+def _recommend(tasks: list[CandidateTask], available_minutes: int = 180):
     return recommend_tasks(
         RecommendInput(
             targetDate=TARGET_DATE,
-            availableStart=start,
-            availableEnd=end,
+            availableMinutes=available_minutes,
             tasks=tasks,
         )
     )
@@ -82,7 +81,7 @@ def test_due_today_tasks_are_selected_before_general_tasks():
             _task(1, due_date=TARGET_DATE, priority="low", final_minutes=60),
             _task(2, due_date=date(2026, 5, 30), priority="high", final_minutes=60),
         ],
-        end=time(10),
+        available_minutes=60,
     )
 
     assert [item.taskId for item in response.recommendations] == [1]
@@ -120,7 +119,7 @@ def test_recommended_minutes_never_exceeds_remaining_available_minutes():
             _task(1, due_date=TARGET_DATE, priority="high", final_minutes=50),
             _task(2, due_date=date(2026, 5, 30), priority="high", final_minutes=50),
         ],
-        end=time(10, 30),
+        available_minutes=90,
     )
 
     assert response.availableMinutes == 90
@@ -131,7 +130,7 @@ def test_recommended_minutes_never_exceeds_remaining_available_minutes():
 def test_task_larger_than_available_minutes_is_partially_recommended():
     response = _recommend(
         [_task(1, due_date=TARGET_DATE, priority="high", final_minutes=180)],
-        end=time(10),
+        available_minutes=60,
     )
 
     item = response.recommendations[0]
@@ -161,7 +160,7 @@ def test_available_shortage_allocates_partial_minutes():
             _task(1, due_date=TARGET_DATE, priority="high", final_minutes=50),
             _task(2, due_date=TARGET_DATE, priority="medium", final_minutes=50),
         ],
-        end=time(10, 20),
+        available_minutes=80,
     )
 
     assert [item.recommendedMinutes for item in response.recommendations] == [50, 30]
@@ -193,4 +192,4 @@ def test_deadline_score_policy():
 
 def test_invalid_available_minutes_raises_value_error():
     with pytest.raises(ValueError):
-        _recommend([_task(1)], start=time(10), end=time(10))
+        _recommend([_task(1)], available_minutes=0)

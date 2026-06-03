@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime
 from typing import Literal
 
 
@@ -37,8 +37,7 @@ class CandidateTask:
 @dataclass(frozen=True)
 class RecommendInput:
     targetDate: date
-    availableStart: time
-    availableEnd: time
+    availableMinutes: int
     tasks: list[CandidateTask]
 
 
@@ -62,8 +61,6 @@ class RecommendedTask:
 @dataclass(frozen=True)
 class RecommendOutput:
     targetDate: date
-    availableStart: time
-    availableEnd: time
     availableMinutes: int
     totalRecommendedMinutes: int
     recommendations: list[RecommendedTask]
@@ -91,9 +88,9 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
     오늘 마감 태스크를 먼저 채우고, 남은 시간에 일반 태스크를 점수 순으로 배정한다.
     """
 
-    available_minutes = calculate_available_minutes(inp.availableStart, inp.availableEnd)
+    available_minutes = inp.availableMinutes
     if available_minutes <= 0:
-        raise ValueError("availableEnd는 availableStart보다 늦어야 합니다.")
+        raise ValueError("availableMinutes는 0보다 커야 합니다.")
 
     scored_tasks = [_score_task(task, inp.targetDate) for task in inp.tasks]
     candidates = [task for task in scored_tasks if task is not None]
@@ -130,19 +127,11 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
     return RecommendOutput(
         targetDate=inp.targetDate,
-        availableStart=inp.availableStart,
-        availableEnd=inp.availableEnd,
         availableMinutes=available_minutes,
         totalRecommendedMinutes=sum(item.recommendedMinutes for item in recommendations),
         recommendations=recommendations,
         message=NO_RECOMMENDATION_MESSAGE if not recommendations else None,
     )
-
-
-def calculate_available_minutes(start: time, end: time) -> int:
-    start_minutes = start.hour * 60 + start.minute
-    end_minutes = end.hour * 60 + end.minute
-    return end_minutes - start_minutes
 
 
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:

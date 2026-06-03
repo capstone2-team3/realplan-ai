@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import time
-
 from fastapi import APIRouter, HTTPException, Request
 
 from app.api.response import ApiResponse, error_response
@@ -97,8 +95,7 @@ def recommend(req: RecommendRequest, request: Request):
     """DB 조회 없이 요청으로 받은 후보 목록만 기준으로 오늘 수행할 태스크를 추천한다."""
     inp = RecommendInput(
         targetDate=req.targetDate,
-        availableStart=req.availableStart,
-        availableEnd=req.availableEnd,
+        availableMinutes=req.availableMinutes,
         tasks=[
             CandidateTask(
                 taskId=task.taskId,
@@ -127,8 +124,6 @@ def recommend(req: RecommendRequest, request: Request):
     return ApiResponse.ok(
         data=RecommendResponse(
             targetDate=result.targetDate,
-            availableStart=_format_time(result.availableStart),
-            availableEnd=_format_time(result.availableEnd),
             availableMinutes=result.availableMinutes,
             totalRecommendedMinutes=result.totalRecommendedMinutes,
             recommendations=[
@@ -173,7 +168,3 @@ async def decompose(req: TaskDecompositionRequest, request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
     return ApiResponse.ok(data=result, path=request.url.path)
-
-
-def _format_time(value: time) -> str:
-    return value.strftime("%H:%M")
