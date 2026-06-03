@@ -10,7 +10,7 @@
 
 | 구분 | 테이블 | 역할 |
 |---|---|---|
-| 기존 테이블 확장 | `task` | AI 예측이 마지막으로 갱신된 시각 저장 |
+| 기존 테이블 확장 | `task` | AI 예측 시간이 마지막으로 갱신된 시각 저장 |
 | 기존 테이블 확장 | `focus_session` | 세션 시작 시점의 계획 시간과 AI 잔여시간 저장 |
 | 기존 테이블 확장 | `session_feedback` | 세션 종료 후 잔여시간 재계산 결과 저장 |
 | 사용자 계수 | `user_ai_profile` | 사용자 단위 global 계획오류율 로그 계수 저장 |
@@ -18,7 +18,7 @@
 | 사용자 계수 | `user_ai_difficulty_residual` | 사용자별 difficulty residual 저장 |
 | 사용자 계수 | `user_ai_folder_residual` | 사용자별 folder residual 저장 |
 | 시스템 prior | `ai_system_prior` | 신규/초기 사용자에게 적용할 시스템 기본 계수 저장 |
-| 예측 로그 | `ai_estimation_log` | `/tasks/estimate` 예상 결과와 입력 스냅샷 저장 |
+| 예측 로그 | `ai_estimation_log` | `/tasks/estimate` 예측 결과와 입력 스냅샷 저장 |
 | 업데이트 로그 | `ai_coefficient_update_log` | `/users/planning-error-rates` 계수 갱신 결과와 전후 스냅샷 저장 |
 
 ## 기존 테이블 확장
@@ -32,7 +32,7 @@
 #### 저장 타이밍
 
 - `/tasks/estimate` 결과를 `task.ai_estimated` 또는 `task.final_estimated`에 반영할 때 갱신합니다.
-- 세션 종료 후 `/sessions/estimate` 결과를 태스크 잔여시간/총 예상시간에 반영하는 정책을 쓴다면 이 시각도 함께 갱신할 수 있습니다.
+- 세션 종료 후 `/sessions/estimate` 결과를 태스크 잔여시간/AI 총 예측시간에 반영하는 정책을 쓴다면 이 시각도 함께 갱신할 수 있습니다.
 
 ### `focus_session`
 
@@ -52,8 +52,8 @@
 
 | 컬럼 | 타입 | API 필드 | 설명 |
 |---|---|---|---|
-| `previous_ai_total_minutes` | `INTEGER` | `previousAiTotalMinutes` | 이번 세션 재계산에 사용한 직전 AI 총 예상시간 |
-| `updated_ai_total_minutes` | `INTEGER` | `updatedAiTotalMinutes` | 세션 결과를 반영한 새로운 AI 총 예상시간 |
+| `previous_ai_total_minutes` | `INTEGER` | `previousAiTotalMinutes` | 이번 세션 재계산에 사용한 직전 AI 총 예측시간 |
+| `updated_ai_total_minutes` | `INTEGER` | `updatedAiTotalMinutes` | 세션 결과를 반영한 새로운 AI 총 예측시간 |
 | `progress_based_remaining_minutes` | `INTEGER` | `progressBasedRemainingMinutes` | 진행률만 이용해 외삽한 잔여시간 |
 | `normalized_remaining_minutes` | `INTEGER` | `normalizedRemainingMinutes` | 집중도 보정 후 보통 집중 기준으로 환산한 잔여시간 |
 | `blending_weight` | `NUMERIC(10, 6)` | `blendingWeight` | 진행률 기반 추정값에 적용한 반영 비중 |
@@ -73,7 +73,7 @@
 
 ## 사용자 AI 계수 테이블
 
-AI 예측은 로그 계수 기반으로 동작합니다.
+AI 예측 시간 계산은 로그 계수 기반으로 동작합니다.
 
 ```text
 aiEstimatedMinutes = estimatedMinutes * exp(logCorrection)
@@ -203,19 +203,19 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 
 ### `ai_estimation_log`
 
-`/tasks/estimate` 호출 결과를 저장하는 로그 테이블입니다. 예측 당시 어떤 입력과 계수로 결과가 나왔는지 추적하기 위한 용도입니다.
+`/tasks/estimate` 호출 결과를 저장하는 로그 테이블입니다. 예측 계산 당시 어떤 입력과 계수로 결과가 나왔는지 추적하기 위한 용도입니다.
 
 | 컬럼 | 타입 | API 필드 | 설명 |
 |---|---|---|---|
 | `estimation_id` | `BIGSERIAL` | 없음 | PK |
 | `task_id` | `BIGINT` | 없음 | 예측 대상 태스크 FK |
 | `user_id` | `BIGINT` | 없음 | 사용자 FK |
-| `estimated_minutes` | `INTEGER` | 요청 `estimatedMinutes` | 사용자가 입력한 원래 예상 시간 |
-| `ai_estimated_minutes` | `NUMERIC(10, 2)` | 응답 `aiEstimatedMinutes` | AI가 보정한 예상 시간 |
+| `estimated_minutes` | `INTEGER` | 요청 `estimatedMinutes` | 사용자가 입력한 원래 추정 시간 |
+| `ai_estimated_minutes` | `NUMERIC(10, 2)` | 응답 `aiEstimatedMinutes` | AI가 보정한 예측 시간 |
 | `correction_factor` | `NUMERIC(10, 6)` | 응답 `correctionFactor` | `exp(logCorrection)` 값 |
 | `log_correction` | `NUMERIC(10, 6)` | 응답 `logCorrection` | 최종 로그 보정값 |
-| `stage` | `VARCHAR(50)` | 응답 `stage` | 예상 단계. 예: `RULE`, `AVERAGE_BASELINE` |
-| `input_snapshot` | `JSONB` | 요청 전체 또는 주요 입력 | 예측 당시 입력값과 사용 계수 스냅샷 |
+| `stage` | `VARCHAR(50)` | 응답 `stage` | 예측 단계. 예: `RULE`, `AVERAGE_BASELINE` |
+| `input_snapshot` | `JSONB` | 요청 전체 또는 주요 입력 | 예측 계산 당시 입력값과 사용 계수 스냅샷 |
 | `created_at` | `TIMESTAMP(6)` | 없음 | 로그 생성 시각 |
 
 #### `input_snapshot` 권장 내용
@@ -257,7 +257,7 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 | `update_id` | `BIGSERIAL` | 없음 | PK |
 | `task_id` | `BIGINT` | 없음 | 완료된 태스크 FK |
 | `user_id` | `BIGINT` | 없음 | 사용자 FK |
-| `estimated_minutes` | `INTEGER` | 요청 `estimatedMinutes` | 사용자가 입력했던 예상 시간 |
+| `estimated_minutes` | `INTEGER` | 요청 `estimatedMinutes` | 사용자가 입력했던 추정 시간 |
 | `actual_minutes` | `INTEGER` | 요청 `actualMinutes` | 실제 수행 시간 |
 | `planning_error_ratio` | `NUMERIC(10, 6)` | 응답 `planningErrorRatio` | `actualMinutes / estimatedMinutes` |
 | `clamped_planning_error_ratio` | `NUMERIC(10, 6)` | 응답 `clampedPlanningErrorRatio` | clamp 후 로그 비율을 다시 exp한 값 |
@@ -329,7 +329,7 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 1. 백엔드가 DB에서 사용자 계수와 시스템 prior를 조회합니다.
 2. 조회한 값을 API 요청의 `userGlobal`, `userTypeResidual`, `userDifficultyResidual`, `userFolderResidual`, `systemGlobalPrior`, `systemTypeEffect`, `systemDifficultyEffect`로 변환합니다.
 3. Python API가 `aiEstimatedMinutes`, `correctionFactor`, `logCorrection`, `stage`를 반환합니다.
-4. 백엔드는 태스크의 AI 예상값과 `task.last_ai_estimated_at`을 갱신합니다.
+4. 백엔드는 태스크의 AI 예측값과 `task.last_ai_estimated_at`을 갱신합니다.
 5. 필요하면 `ai_estimation_log`에 입력 스냅샷과 결과를 저장합니다.
 
 ### `/users/planning-error-rates`
@@ -347,7 +347,7 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 2. 세션 종료 후 백엔드가 `elapsedMinutes`, `progress`, `focusLevel`, `previousAiTotalMinutes`를 Python API에 전달합니다.
 3. Python API가 잔여시간 재계산 결과를 반환합니다.
 4. 백엔드는 `session_feedback`에 계산 결과를 저장합니다.
-5. 필요하면 태스크의 AI 총 예상시간 또는 잔여시간과 `task.last_ai_estimated_at`을 갱신합니다.
+5. 필요하면 태스크의 AI 총 예측시간 또는 잔여시간과 `task.last_ai_estimated_at`을 갱신합니다.
 
 ## 시간 필드 기준
 

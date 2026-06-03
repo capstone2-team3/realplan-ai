@@ -1,4 +1,4 @@
-"""completedCount에 따라 운영 가능한 초기 예상 stage를 선택하는 라우터."""
+"""completedCount에 따라 운영 가능한 초기 예측 stage를 선택하는 라우터."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class PlanningRouter:
         self.interaction = InteractionStage()
 
     def estimate(self, req: EstimateRequest) -> EstimateResponse:
-        """completedCount에 따라 초기 소요 시간 예상 stage를 선택한다."""
+        """completedCount에 따라 초기 소요 시간 예측 stage를 선택한다."""
         validate_estimated_minutes(req.estimatedMinutes)
 
         completed = req.completedCount

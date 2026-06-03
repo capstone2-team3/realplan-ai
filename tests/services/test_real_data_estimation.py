@@ -1,9 +1,9 @@
-"""실데이터로 예상 소요시간을 계산해 출력하는 테스트.
+"""실데이터로 예측 소요시간을 계산해 출력하는 테스트.
 
 실행:
     uv run python -m pytest tests/services/test_real_data_estimation.py -v -s
 
--s 옵션으로 print 출력(예상 결과 표)을 함께 본다.
+-s 옵션으로 print 출력(예측 결과 표)을 함께 본다.
 
 전제:
 - 모든 사용자가 신규 사용자(userGlobal=None). 시스템 prior만으로 예측.

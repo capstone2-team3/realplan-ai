@@ -1,4 +1,4 @@
-"""개인화 평균 baseline 기반 초기 소요 시간 예상 stage."""
+"""개인화 평균 baseline 기반 초기 소요 시간 예측 stage."""
 
 from __future__ import annotations
 

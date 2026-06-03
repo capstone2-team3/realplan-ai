@@ -144,7 +144,7 @@ def calculate_available_minutes(start: time, end: time) -> int:
 
 
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:
-    """최종 예상 시간에서 실제 수행 시간과 이미 잡힌 일정 시간을 빼 남은 시간을 구한다."""
+    """최종 예측 시간에서 실제 수행 시간과 이미 잡힌 일정 시간을 빼 남은 시간을 구한다."""
 
     final_estimated_minutes = _resolve_final_estimated_minutes(task)
     if final_estimated_minutes is None:
@@ -231,7 +231,7 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
 
 
 def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
-    """사용자 보정값을 최우선으로 보고, 없으면 AI 예상값까지 순서대로 fallback한다."""
+    """사용자 보정값을 최우선으로 보고, 없으면 AI 예측값까지 순서대로 fallback한다."""
 
     for minutes in (
         task.finalEstimatedMinutes,

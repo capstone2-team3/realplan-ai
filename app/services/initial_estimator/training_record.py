@@ -1,4 +1,4 @@
-"""초기 예상 모델 학습용 record 생성 유틸."""
+"""초기 예측 모델 학습용 record 생성 유틸."""
 
 from __future__ import annotations
 

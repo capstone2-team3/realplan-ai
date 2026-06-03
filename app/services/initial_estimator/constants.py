@@ -1,4 +1,4 @@
-"""초기 소요 시간 예상 모델 내부 상수."""
+"""초기 소요 시간 예측 모델 내부 상수."""
 
 from __future__ import annotations
 
