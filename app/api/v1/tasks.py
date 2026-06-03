@@ -19,7 +19,6 @@ from app.schemas.tasks import TaskDecompositionRequest, TaskDecompositionRespons
 from app.services.classifier import (
     ClassifyInput,
     HistoricalTask,
-    NoOpPersonalization,
     classify_task,
 )
 from app.services.common import CalculationError
@@ -52,7 +51,7 @@ def classify(req: ClassifyRequest, request: Request):
     )
 
     try:
-        result = classify_task(inp, personalization=NoOpPersonalization())
+        result = classify_task(inp)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM 호출 실패: {e}")
 

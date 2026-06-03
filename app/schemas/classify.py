@@ -19,7 +19,7 @@ class ClassifyRequest(BaseModel):
     memo: Optional[str] = None
     user_history: Optional[list[HistoricalTaskDTO]] = Field(
         default=None,
-        description="해당 사용자의 과거 분류 이력. MVP에선 보내지 않아도 됨.",
+        description="해당 사용자의 과거 분류 이력. 유사 태스크가 있으면 기존 유형을 우선 사용함.",
     )
 
 

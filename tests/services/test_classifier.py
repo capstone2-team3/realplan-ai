@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 from app.schemas.classify import ClassifyResponse
 from app.services.classifier.classification import classify_task
-from app.services.classifier.personalization import KeywordPersonalization
 from app.services.classifier.types import ClassifyInput, HistoricalTask, TaskType
 
 
@@ -67,7 +66,6 @@ def test_history_match_output_contract():
             ],
         ),
         client=FakeClient(None),
-        personalization=KeywordPersonalization(overlap_threshold=0.2),
     )
 
     assert result.task_type == TaskType.SATISFACTION_BOUND

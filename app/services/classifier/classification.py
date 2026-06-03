@@ -14,7 +14,7 @@ from typing import Optional
 from app.core.config import OPENAI_API_KEY
 from app.services.classifier.constants import DEFAULT_OPENAI_MODEL
 from app.services.classifier.personalization import (
-    NoOpPersonalization,
+    KeywordPersonalization,
     PersonalizationLayer,
 )
 from app.services.classifier.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT
@@ -60,7 +60,7 @@ def classify_task(
     """과거 이력 매칭을 먼저 시도하고, 없으면 LLM으로 태스크 유형을 분류한다."""
 
     if personalization is None:
-        personalization = NoOpPersonalization()
+        personalization = KeywordPersonalization()
 
     if inp.user_history:
         # 같은 사용자의 유사 태스크는 기존 분류를 따라가야 학습 계수가 흔들리지 않는다.

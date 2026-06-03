@@ -4,8 +4,6 @@
 같은 "운영체제 Chap.3 정리"라도 사용자에 따라 만족형/분량형으로 갈릴 수 있음.
 같은 사용자 안에서는 분류가 일관되어야 보정 계수 학습이 안정적이므로,
 과거 분류 이력을 반영하는 레이어를 둠.
-
-MVP 단계: NoOpPersonalization (LLM 분류 그대로 사용)
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ class PersonalizationLayer(Protocol):
 
 
 class NoOpPersonalization:
-    """MVP용. 항상 None 반환 → LLM 분류 그대로 사용."""
+    """테스트나 명시적 비활성화용. 항상 None 반환 → LLM 분류 그대로 사용."""
 
     def find_similar_classification(
         self,
