@@ -13,7 +13,7 @@ TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
 class RecommendCandidateDTO(BaseModel):
     """Spring이 선별해 넘긴 추천 후보 한 건.
 
-    Python은 전달받은 원천 시간 값으로 남은 시간을 계산하고 추천 정책을 적용한다.
+    Python은 백엔드의 remainingMin에서 유효한 예정 시간을 빼 추천 가능한 남은 시간을 계산한다.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -23,9 +23,7 @@ class RecommendCandidateDTO(BaseModel):
     dueDate: date | datetime | None = None
     priority: str | None = None
     status: TaskStatus
-    finalEstimatedMinutes: int | None = Field(default=None, gt=0)
-    aiEstimatedMinutes: int | None = Field(default=None, gt=0)
-    totalActualMinutes: int | None = Field(default=0, ge=0)
+    remainingMinutes: int = Field(..., gt=0)
     activeScheduledMinutes: int | None = Field(default=0, ge=0)
 
 

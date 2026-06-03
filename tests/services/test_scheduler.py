@@ -20,9 +20,7 @@ def _task(
     due_date: date | None = None,
     priority: str | None = "medium",
     status: str = "PENDING",
-    final_minutes: int | None = 60,
-    ai_minutes: int | None = None,
-    actual_minutes: int | None = 0,
+    remaining_minutes: int = 60,
     active_scheduled_minutes: int | None = 0,
 ) -> CandidateTask:
     return CandidateTask(
@@ -31,9 +29,7 @@ def _task(
         dueDate=due_date,
         priority=priority,
         status=status,
-        finalEstimatedMinutes=final_minutes,
-        aiEstimatedMinutes=ai_minutes,
-        totalActualMinutes=actual_minutes,
+        remainingMinutes=remaining_minutes,
         activeScheduledMinutes=active_scheduled_minutes,
     )
 
@@ -55,8 +51,7 @@ def test_remaining_zero_is_excluded_even_if_due_today():
                 1,
                 due_date=TARGET_DATE,
                 priority="high",
-                final_minutes=60,
-                actual_minutes=60,
+                remaining_minutes=0,
             )
         ]
     )
@@ -68,9 +63,9 @@ def test_remaining_zero_is_excluded_even_if_due_today():
 def test_completed_status_is_excluded():
     response = _recommend(
         [
-            _task(1, status="COMPLETED", final_minutes=60),
-            _task(2, status="PENDING", final_minutes=60),
-            _task(3, status="IN_PROGRESS", final_minutes=60),
+            _task(1, status="COMPLETED", remaining_minutes=60),
+            _task(2, status="PENDING", remaining_minutes=60),
+            _task(3, status="IN_PROGRESS", remaining_minutes=60),
         ]
     )
 
@@ -80,8 +75,8 @@ def test_completed_status_is_excluded():
 def test_due_today_tasks_are_selected_before_general_tasks():
     response = _recommend(
         [
-            _task(1, due_date=TARGET_DATE, priority="low", final_minutes=60),
-            _task(2, due_date=date(2026, 5, 30), priority="high", final_minutes=60),
+            _task(1, due_date=TARGET_DATE, priority="low", remaining_minutes=60),
+            _task(2, due_date=date(2026, 5, 30), priority="high", remaining_minutes=60),
         ],
         available_minutes=60,
     )
@@ -92,8 +87,8 @@ def test_due_today_tasks_are_selected_before_general_tasks():
 def test_final_display_order_uses_recommend_score_after_selection():
     response = _recommend(
         [
-            _task(1, due_date=TARGET_DATE, priority="low", final_minutes=60),
-            _task(2, due_date=date(2026, 5, 30), priority="high", final_minutes=60),
+            _task(1, due_date=TARGET_DATE, priority="low", remaining_minutes=60),
+            _task(2, due_date=date(2026, 5, 30), priority="high", remaining_minutes=60),
         ]
     )
 
@@ -104,11 +99,11 @@ def test_final_display_order_uses_recommend_score_after_selection():
 def test_recommendations_are_limited_to_four():
     response = _recommend(
         [
-            _task(1, due_date=TARGET_DATE, priority="high", final_minutes=10),
-            _task(2, due_date=TARGET_DATE, priority="medium", final_minutes=10),
-            _task(3, due_date=TARGET_DATE, priority="low", final_minutes=10),
-            _task(4, due_date=date(2026, 5, 30), priority="high", final_minutes=10),
-            _task(5, due_date=date(2026, 5, 31), priority="high", final_minutes=10),
+            _task(1, due_date=TARGET_DATE, priority="high", remaining_minutes=10),
+            _task(2, due_date=TARGET_DATE, priority="medium", remaining_minutes=10),
+            _task(3, due_date=TARGET_DATE, priority="low", remaining_minutes=10),
+            _task(4, due_date=date(2026, 5, 30), priority="high", remaining_minutes=10),
+            _task(5, due_date=date(2026, 5, 31), priority="high", remaining_minutes=10),
         ]
     )
 
@@ -118,8 +113,8 @@ def test_recommendations_are_limited_to_four():
 def test_recommended_minutes_never_exceeds_remaining_available_minutes():
     response = _recommend(
         [
-            _task(1, due_date=TARGET_DATE, priority="high", final_minutes=50),
-            _task(2, due_date=date(2026, 5, 30), priority="high", final_minutes=50),
+            _task(1, due_date=TARGET_DATE, priority="high", remaining_minutes=50),
+            _task(2, due_date=date(2026, 5, 30), priority="high", remaining_minutes=50),
         ],
         available_minutes=90,
     )
@@ -131,7 +126,7 @@ def test_recommended_minutes_never_exceeds_remaining_available_minutes():
 
 def test_task_larger_than_available_minutes_is_partially_recommended():
     response = _recommend(
-        [_task(1, due_date=TARGET_DATE, priority="high", final_minutes=180)],
+        [_task(1, due_date=TARGET_DATE, priority="high", remaining_minutes=180)],
         available_minutes=60,
     )
 
@@ -149,22 +144,20 @@ def test_null_due_date_uses_low_deadline_score():
     assert item.deadlineLabel == "마감 없음"
 
 
-def test_remaining_minutes_are_calculated_from_source_time_fields():
+def test_active_scheduled_minutes_are_subtracted_from_remaining_minutes():
     response = _recommend(
         [
             _task(
                 1,
-                final_minutes=None,
-                ai_minutes=100,
-                actual_minutes=25,
+                remaining_minutes=100,
                 active_scheduled_minutes=15,
             )
         ]
     )
 
     item = response.recommendations[0]
-    assert item.remainingMinutes == 60
-    assert item.recommendedMinutes == 60
+    assert item.remainingMinutes == 85
+    assert item.recommendedMinutes == 85
 
 
 def test_priority_scores_are_calculated_case_insensitively():
@@ -177,8 +170,8 @@ def test_priority_scores_are_calculated_case_insensitively():
 def test_available_shortage_allocates_partial_minutes():
     response = _recommend(
         [
-            _task(1, due_date=TARGET_DATE, priority="high", final_minutes=50),
-            _task(2, due_date=TARGET_DATE, priority="medium", final_minutes=50),
+            _task(1, due_date=TARGET_DATE, priority="high", remaining_minutes=50),
+            _task(2, due_date=TARGET_DATE, priority="medium", remaining_minutes=50),
         ],
         available_minutes=80,
     )
@@ -189,8 +182,8 @@ def test_available_shortage_allocates_partial_minutes():
 def test_total_recommended_minutes_matches_sum():
     response = _recommend(
         [
-            _task(1, due_date=TARGET_DATE, priority="high", final_minutes=40),
-            _task(2, due_date=date(2026, 5, 31), priority="medium", final_minutes=30),
+            _task(1, due_date=TARGET_DATE, priority="high", remaining_minutes=40),
+            _task(2, due_date=date(2026, 5, 31), priority="medium", remaining_minutes=30),
         ]
     )
 

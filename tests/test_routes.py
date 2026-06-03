@@ -118,7 +118,7 @@ def test_invalid_task_status_is_rejected():
                     "taskId": 1,
                     "title": "task",
                     "status": "TODO",
-                    "finalEstimatedMinutes": 60,
+                    "remainingMinutes": 60,
                 }
             ],
         },

@@ -103,9 +103,7 @@ def recommend(req: RecommendRequest, request: Request):
                 dueDate=task.dueDate,
                 priority=task.priority,
                 status=task.status,
-                finalEstimatedMinutes=task.finalEstimatedMinutes,
-                aiEstimatedMinutes=task.aiEstimatedMinutes,
-                totalActualMinutes=task.totalActualMinutes,
+                remainingMinutes=task.remainingMinutes,
                 activeScheduledMinutes=task.activeScheduledMinutes,
             )
             for task in req.tasks

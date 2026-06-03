@@ -22,11 +22,9 @@ class CandidateTask:
     taskId: int
     title: str
     status: TaskStatus
+    remainingMinutes: int
     dueDate: date | datetime | None = None
     priority: str | None = None
-    finalEstimatedMinutes: int | None = None
-    aiEstimatedMinutes: int | None = None
-    totalActualMinutes: int | None = None
     activeScheduledMinutes: int | None = None
 
 
@@ -131,15 +129,10 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
 
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:
-    """최종 예측 시간에서 실제 수행 시간과 유효한 예정 시간을 빼 남은 시간을 구한다."""
-
-    final_estimated_minutes = _resolve_final_estimated_minutes(task)
-    if final_estimated_minutes is None:
-        return None
+    """백엔드 remainingMin에서 이미 유효하게 배치된 시간을 빼 추천 가능한 남은 시간을 구한다."""
 
     return (
-        final_estimated_minutes
-        - _none_to_zero(task.totalActualMinutes)
+        task.remainingMinutes
         - _none_to_zero(task.activeScheduledMinutes)
     )
 
@@ -208,18 +201,6 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         deadline_label=_deadline_label(due_day, target_date),
         priority_label=_priority_label(task.priority),
     )
-
-
-def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
-    """최종 확정값을 우선 사용하고, 없으면 AI 예측값으로 fallback한다."""
-
-    for minutes in (
-        task.finalEstimatedMinutes,
-        task.aiEstimatedMinutes,
-    ):
-        if minutes is not None and minutes > 0:
-            return minutes
-    return None
 
 
 def _is_excluded_status(status: str | None) -> bool:
