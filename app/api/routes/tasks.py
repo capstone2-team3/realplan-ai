@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.response import ApiResponse, error_response
 from app.schemas.classify import ClassifyRequest, ClassifyResponse
-from app.schemas.predict import PredictRequest, PredictResponse
+from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.recommend import (
     RecommendedTaskDTO,
     RecommendRequest,
@@ -66,11 +66,11 @@ def classify(req: ClassifyRequest, request: Request):
 
 @router.post(
     "/tasks/estimate",
-    response_model=ApiResponse[PredictResponse],
-    summary="태스크 예상 소요시간 산정",
+    response_model=ApiResponse[EstimateResponse],
+    summary="태스크 AI 예상 소요시간 산정",
     description="Spring에서 전달한 계획오류율과 count를 기반으로 태스크의 보정된 예상 소요시간을 계산한다.",
 )
-def predict(req: PredictRequest, request: Request):
+def estimate(req: EstimateRequest, request: Request):
     """Spring에서 전달한 계수와 count 기반으로 보정 소요시간을 계산한다."""
     try:
         result = estimate_initial_duration(req)
@@ -79,8 +79,8 @@ def predict(req: PredictRequest, request: Request):
     except Exception:
         return error_response(
             500,
-            "PREDICTION_FAILED",
-            "예측 계산 중 오류가 발생했습니다.",
+            "ESTIMATION_FAILED",
+            "예상 소요시간 계산 중 오류가 발생했습니다.",
             request.url.path,
         )
 

@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from app.schemas.predict import PredictRequest
+from app.schemas.estimate import EstimateRequest
 from app.schemas.update import UpdateRequest
 from app.services.initial_estimator.constants import (
     CLAMP_MAX,
@@ -38,7 +38,7 @@ SYSTEM_GLOBAL = 0.1
 SYSTEM_TYPE = {"SATISFACTION_BASED": 0.05, "PROBLEM_SOLVING": -0.02}
 SYSTEM_DIFFICULTY = {"LOW": -0.03, "MEDIUM": 0.0, "HIGH": 0.08}
 
-def _make_predict_request(**overrides):
+def _make_estimate_request(**overrides):
     base = dict(
         estimatedMinutes=60.0,
         completedCount=0,
@@ -57,7 +57,7 @@ def _make_predict_request(**overrides):
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
     )
     base.update(overrides)
-    return PredictRequest(**base)
+    return EstimateRequest(**base)
 
 
 def _make_update_request(**overrides):
@@ -83,29 +83,29 @@ def _make_update_request(**overrides):
     return UpdateRequest(**base)
 
 
-# ---------- predict ----------------------------------------------------
+# ---------- estimate ----------------------------------------------------
 
 
 def test_average_stage_uses_average_baseline_formula():
     stage = AverageBaselineStage()
-    req = _make_predict_request(taskType="SATISFACTION_BASED", difficulty="HIGH")
-    result = stage.predict(req)
+    req = _make_estimate_request(taskType="SATISFACTION_BASED", difficulty="HIGH")
+    result = stage.estimate(req)
 
     expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION_BASED"] + SYSTEM_DIFFICULTY["HIGH"]
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
     assert math.isclose(result.correctionFactor, math.exp(expected_log), rel_tol=1e-9)
     assert math.isclose(
-        result.predictedMinutes,
+        result.aiEstimatedMinutes,
         60.0 * result.correctionFactor,
         rel_tol=1e-9,
     )
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
-def test_predict_existing_user_applies_residual_with_shrinkage():
+def test_estimate_existing_user_applies_residual_with_shrinkage():
     """기존 사용자: safe_user_global + type/difficulty/folder residual shrinkage 적용."""
     stage = AverageBaselineStage()
-    req = _make_predict_request(
+    req = _make_estimate_request(
         completedCount=30,
         taskType="PROBLEM_SOLVING",
         difficulty="HIGH",
@@ -118,7 +118,7 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
         difficultyCount={"HIGH": 20},
         folderCount={"folder-1": 40},
     )
-    result = stage.predict(req)
+    result = stage.estimate(req)
 
     user_weight = 30 / (30 + USER_GLOBAL_SHRINKAGE_N)
     safe_user_global = user_weight * 0.2 + (1 - user_weight) * SYSTEM_GLOBAL
@@ -137,14 +137,14 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
-def test_predict_unknown_keys_fallback_to_zero():
+def test_estimate_unknown_keys_fallback_to_zero():
     """systemTypeEffect/Difficulty에 없는 키가 들어와도 0으로 fallback."""
     stage = AverageBaselineStage()
-    req = _make_predict_request(
+    req = _make_estimate_request(
         taskType="UNKNOWN_TYPE",
         difficulty="UNKNOWN",
     )
-    result = stage.predict(req)
+    result = stage.estimate(req)
 
     expected_log = SYSTEM_GLOBAL + 0.0 + 0.0
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
@@ -152,16 +152,16 @@ def test_predict_unknown_keys_fallback_to_zero():
 
 def test_average_stage_ignores_folder_residual_when_folder_is_missing():
     stage = AverageBaselineStage()
-    without_folder = stage.predict(
-        _make_predict_request(
+    without_folder = stage.estimate(
+        _make_estimate_request(
             completedCount=30,
             folderId=None,
             userFolderResidual={"folder-1": 99.0},
             folderCount={"folder-1": 100},
         )
     )
-    empty_folder = stage.predict(
-        _make_predict_request(completedCount=30, folderId=None)
+    empty_folder = stage.estimate(
+        _make_estimate_request(completedCount=30, folderId=None)
     )
 
     assert math.isclose(without_folder.logCorrection, empty_folder.logCorrection, rel_tol=1e-9)
@@ -412,17 +412,17 @@ def test_drop_constants_are_aligned_with_clamp():
 
 def test_router_completed_zero_returns_rule():
     router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=0))
+    result = router.estimate(_make_estimate_request(completedCount=0))
     assert result.stage == STAGE_RULE
 
 
 def test_router_low_count_returns_rule_average_blend():
     """1 이상 EARLY_THRESHOLD 미만이면 RULE과 AVERAGE를 log 공간에서 섞는다."""
     router = PlanningRouter()
-    req = _make_predict_request(completedCount=5, userGlobal=0.4)
-    result = router.predict(req)
-    rule = router.rule.predict(req)
-    average = router.average.predict(req)
+    req = _make_estimate_request(completedCount=5, userGlobal=0.4)
+    result = router.estimate(req)
+    rule = router.rule.estimate(req)
+    average = router.average.estimate(req)
     w_average = req.completedCount / EARLY_THRESHOLD
     expected_log = (
         (1 - w_average) * rule.logCorrection
@@ -433,7 +433,7 @@ def test_router_low_count_returns_rule_average_blend():
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
     assert math.isclose(result.correctionFactor, math.exp(expected_log), rel_tol=1e-9)
     assert math.isclose(
-        result.predictedMinutes,
+        result.aiEstimatedMinutes,
         req.estimatedMinutes * result.correctionFactor,
         rel_tol=1e-9,
     )
@@ -442,16 +442,16 @@ def test_router_low_count_returns_rule_average_blend():
 def test_router_average_window_returns_average():
     """EARLY_THRESHOLD 이상 MAIN_THRESHOLD 미만이면 average baseline을 사용한다."""
     router = PlanningRouter()
-    result = router.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
+    result = router.estimate(_make_estimate_request(completedCount=EARLY_THRESHOLD))
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_router_main_stub_falls_back_to_average_with_fallback_stage():
     """MAIN_THRESHOLD 이상이면 Ridge stub을 시도하고 average 결과로 폴백한다."""
     router = PlanningRouter()
-    req = _make_predict_request(completedCount=MAIN_THRESHOLD)
-    result = router.predict(req)
-    average = router.average.predict(req)
+    req = _make_estimate_request(completedCount=MAIN_THRESHOLD)
+    result = router.estimate(req)
+    average = router.average.estimate(req)
 
     assert result.stage == STAGE_MAIN_FALLBACK
     assert math.isclose(result.logCorrection, average.logCorrection, rel_tol=1e-9)
@@ -482,8 +482,8 @@ def test_training_record_contains_update_snapshot():
         req=req,
         task_id=11,
         user_id=22,
-        predicted_minutes=70.0,
-        predicted_log_correction=0.2,
+        ai_estimated_minutes=70.0,
+        estimated_log_correction=0.2,
         model_stage=STAGE_AVERAGE_BASELINE,
         model_version="test",
     )
@@ -509,13 +509,13 @@ def test_training_record_contains_update_snapshot():
         rel_tol=1e-9,
     )
     assert math.isclose(record["correction_factor"], math.exp(0.2), rel_tol=1e-9)
-    assert record["user_difficulty_residual_at_prediction"] == {"MEDIUM": -0.1}
-    assert record["user_folder_residual_at_prediction"] == {"folder-1": 0.3}
-    assert record["difficulty_count_at_prediction"] == {"MEDIUM": 2}
-    assert record["folder_count_at_prediction"] == {"folder-1": 4}
+    assert record["user_difficulty_residual_at_estimation"] == {"MEDIUM": -0.1}
+    assert record["user_folder_residual_at_estimation"] == {"folder-1": 0.3}
+    assert record["difficulty_count_at_estimation"] == {"MEDIUM": 2}
+    assert record["folder_count_at_estimation"] == {"folder-1": 4}
     assert record["dropped"] is False
     assert record["drop_reason"] is None
     assert record["model_stage"] == STAGE_AVERAGE_BASELINE
     assert "priority" not in record
-    assert "system_priority_effect_at_prediction" not in record
+    assert "system_priority_effect_at_estimation" not in record
     assert record["model_version"] == "test"

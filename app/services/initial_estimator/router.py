@@ -1,11 +1,11 @@
-"""completedCount에 따라 운영 가능한 초기 예측 stage를 선택하는 라우터."""
+"""completedCount에 따라 운영 가능한 초기 예상 stage를 선택하는 라우터."""
 
 from __future__ import annotations
 
 import logging
 import math
 
-from app.schemas.predict import PredictRequest, PredictResponse
+from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
 from app.services.initial_estimator.average_stage import AverageBaselineStage
 from app.services.initial_estimator.constants import (
@@ -32,17 +32,17 @@ class PlanningRouter:
         self.main = MainEffectStage()
         self.interaction = InteractionStage()
 
-    def predict(self, req: PredictRequest) -> PredictResponse:
-        """completedCount에 따라 초기 소요 시간 예측 stage를 선택한다."""
+    def estimate(self, req: EstimateRequest) -> EstimateResponse:
+        """completedCount에 따라 초기 소요 시간 예상 stage를 선택한다."""
         validate_estimated_minutes(req.estimatedMinutes)
 
         completed = req.completedCount
         if completed <= 0:
-            return self.rule.predict(req)
+            return self.rule.estimate(req)
 
         if completed < EARLY_THRESHOLD:
-            rule_result = self.rule.predict(req)
-            average_result = self.average.predict(req)
+            rule_result = self.rule.estimate(req)
+            average_result = self.average.estimate(req)
             w_average = completed / EARLY_THRESHOLD
             w_rule = 1 - w_average
             blended_log = (
@@ -50,25 +50,25 @@ class PlanningRouter:
                 + w_average * average_result.logCorrection
             )
             correction_factor = math.exp(blended_log)
-            return PredictResponse(
-                predictedMinutes=req.estimatedMinutes * correction_factor,
+            return EstimateResponse(
+                aiEstimatedMinutes=req.estimatedMinutes * correction_factor,
                 correctionFactor=correction_factor,
                 logCorrection=blended_log,
                 stage=STAGE_RULE_AVERAGE_BLEND,
             )
 
         if completed < MAIN_THRESHOLD:
-            return self.average.predict(req)
+            return self.average.estimate(req)
 
         try:
-            return self.main.predict(req)
+            return self.main.estimate(req)
         except NotImplementedError:
             logger.warning(
-                "%s predict not implemented (completed=%d), falling back to average",
+                "%s estimate not implemented (completed=%d), falling back to average",
                 STAGE_MAIN,
                 completed,
             )
-            result = self.average.predict(req)
+            result = self.average.estimate(req)
             return result.model_copy(update={"stage": STAGE_MAIN_FALLBACK})
 
     def update(self, req: UpdateRequest) -> UpdateResponse:

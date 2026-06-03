@@ -7,7 +7,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class PredictRequest(BaseModel):
+class EstimateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     estimatedMinutes: float = Field(..., description="사용자가 입력한 추정 소요시간(분)")
@@ -34,8 +34,8 @@ class PredictRequest(BaseModel):
     systemDifficultyEffect: dict[str, float]
 
 
-class PredictResponse(BaseModel):
-    predictedMinutes: float
+class EstimateResponse(BaseModel):
+    aiEstimatedMinutes: float
     correctionFactor: float
     logCorrection: float
     stage: str

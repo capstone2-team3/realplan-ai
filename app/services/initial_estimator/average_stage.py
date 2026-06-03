@@ -1,11 +1,11 @@
-"""개인화 평균 baseline 기반 초기 소요 시간 예측 stage."""
+"""개인화 평균 baseline 기반 초기 소요 시간 예상 stage."""
 
 from __future__ import annotations
 
 import logging
 import math
 
-from app.schemas.predict import PredictRequest, PredictResponse
+from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
 from app.services.initial_estimator.base import PlanningStage
 from app.services.initial_estimator.constants import (
@@ -36,7 +36,7 @@ class AverageBaselineStage(PlanningStage):
 
     stage_label = STAGE_AVERAGE_BASELINE
 
-    def predict(self, req: PredictRequest) -> PredictResponse:
+    def estimate(self, req: EstimateRequest) -> EstimateResponse:
         validate_estimated_minutes(req.estimatedMinutes)
 
         user_weight = req.completedCount / (
@@ -86,8 +86,8 @@ class AverageBaselineStage(PlanningStage):
         )
         correction_factor = math.exp(log_correction)
 
-        return PredictResponse(
-            predictedMinutes=req.estimatedMinutes * correction_factor,
+        return EstimateResponse(
+            aiEstimatedMinutes=req.estimatedMinutes * correction_factor,
             correctionFactor=correction_factor,
             logCorrection=log_correction,
             stage=self.stage_label,

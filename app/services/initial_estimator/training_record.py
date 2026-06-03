@@ -1,4 +1,4 @@
-"""초기 예측 모델 학습용 record 생성 유틸."""
+"""초기 예상 모델 학습용 record 생성 유틸."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ def build_initial_training_record(
     req: UpdateRequest,
     task_id: int | None = None,
     user_id: int | None = None,
-    predicted_minutes: float | None = None,
-    predicted_log_correction: float | None = None,
+    ai_estimated_minutes: float | None = None,
+    estimated_log_correction: float | None = None,
     model_stage: str | None = None,
     model_version: str | None = None,
 ) -> dict[str, Any]:
@@ -32,8 +32,8 @@ def build_initial_training_record(
     clamped_log_ratio = clamp_log_ratio(log_ratio)
     clamped_ratio = math.exp(clamped_log_ratio)
     correction_factor = (
-        math.exp(predicted_log_correction)
-        if predicted_log_correction is not None
+        math.exp(estimated_log_correction)
+        if estimated_log_correction is not None
         else None
     )
     dropped, drop_reason = should_drop_ratio(ratio)
@@ -56,21 +56,21 @@ def build_initial_training_record(
         "drop_reason": drop_reason,
         "task_type": req.taskType,
         "difficulty": req.difficulty,
-        "completed_count_at_prediction": req.completedCount,
-        "user_global_at_prediction": req.userGlobal,
-        "user_type_residual_at_prediction": dict(req.userTypeResidual or {}),
-        "user_difficulty_residual_at_prediction": dict(
+        "completed_count_at_estimation": req.completedCount,
+        "user_global_at_estimation": req.userGlobal,
+        "user_type_residual_at_estimation": dict(req.userTypeResidual or {}),
+        "user_difficulty_residual_at_estimation": dict(
             req.userDifficultyResidual or {}
         ),
-        "user_folder_residual_at_prediction": dict(req.userFolderResidual or {}),
-        "type_count_at_prediction": dict(req.typeCount or {}),
-        "difficulty_count_at_prediction": dict(req.difficultyCount or {}),
-        "folder_count_at_prediction": dict(req.folderCount or {}),
-        "system_global_prior_at_prediction": req.systemGlobalPrior,
-        "system_type_effect_at_prediction": dict(req.systemTypeEffect),
-        "system_difficulty_effect_at_prediction": dict(req.systemDifficultyEffect),
-        "predicted_minutes": predicted_minutes,
-        "predicted_log_correction": predicted_log_correction,
+        "user_folder_residual_at_estimation": dict(req.userFolderResidual or {}),
+        "type_count_at_estimation": dict(req.typeCount or {}),
+        "difficulty_count_at_estimation": dict(req.difficultyCount or {}),
+        "folder_count_at_estimation": dict(req.folderCount or {}),
+        "system_global_prior_at_estimation": req.systemGlobalPrior,
+        "system_type_effect_at_estimation": dict(req.systemTypeEffect),
+        "system_difficulty_effect_at_estimation": dict(req.systemDifficultyEffect),
+        "ai_estimated_minutes": ai_estimated_minutes,
+        "estimated_log_correction": estimated_log_correction,
         "model_stage": model_stage,
         "model_version": model_version,
     }

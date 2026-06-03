@@ -1,9 +1,9 @@
-"""실데이터로 예측 소요시간을 계산해 출력하는 테스트.
+"""실데이터로 예상 소요시간을 계산해 출력하는 테스트.
 
 실행:
-    uv run python -m pytest tests/services/test_real_data_prediction.py -v -s
+    uv run python -m pytest tests/services/test_real_data_estimation.py -v -s
 
--s 옵션으로 print 출력(예측 결과 표)을 함께 본다.
+-s 옵션으로 print 출력(예상 결과 표)을 함께 본다.
 
 전제:
 - 모든 사용자가 신규 사용자(userGlobal=None). 시스템 prior만으로 예측.
@@ -18,7 +18,7 @@ import math
 
 import pytest
 
-from app.schemas.predict import PredictRequest
+from app.schemas.estimate import EstimateRequest
 from app.schemas.update import UpdateRequest
 from app.services.initial_estimator.constants import (
     CLAMP_MAX,
@@ -37,14 +37,14 @@ def _print_formula_header():
     """출력 상단에 사용한 수식과 상수값을 명시한다."""
     print()
     print("====================== 적용 수식 ======================")
-    print("[predict]")
+    print("[estimate]")
     print("  r_type           = typeCount / (typeCount + TYPE_SHRINKAGE_N)")
     print("  logCorrection    = userGlobal")
     print("                   + systemTypeEffect[type]")
     print("                   + systemDifficultyEffect[difficulty]")
     print("                   + r_type × userTypeResidual[type]")
     print("                   + r_difficulty × userDifficultyResidual[difficulty]")
-    print("  predictedMinutes = estimatedMinutes × exp(logCorrection)")
+    print("  aiEstimatedMinutes = estimatedMinutes × exp(logCorrection)")
     print()
     print("[update]")
     print("  ratio                  = actual / estimated")
@@ -131,8 +131,8 @@ REAL_TASKS = [
 ]
 
 
-def _build_request(estimated: float, type_kr: str, difficulty_kr: str, completed: int = 0) -> PredictRequest:
-    return PredictRequest(
+def _build_request(estimated: float, type_kr: str, difficulty_kr: str, completed: int = 0) -> EstimateRequest:
+    return EstimateRequest(
         estimatedMinutes=estimated,
         completedCount=completed,
         taskType=TASK_TYPE_MAP[type_kr],
@@ -150,7 +150,7 @@ def _build_request(estimated: float, type_kr: str, difficulty_kr: str, completed
 # ---------- 전체 데이터 예측 + 표 출력 --------------------------------
 
 
-def test_predict_all_real_tasks_and_print_table():
+def test_estimate_all_real_tasks_and_print_table():
     """전체 실데이터에 대해 예측을 수행하고 결과를 표로 출력한다."""
     print()
     print(f"{'사용자':<4} {'ID':>3} | {'유형':<4} {'난이도':<4} | "
@@ -158,32 +158,32 @@ def test_predict_all_real_tasks_and_print_table():
     print("-" * 60)
 
     total_estimated = 0.0
-    total_predicted = 0.0
+    total_ai_estimated = 0.0
 
     for user, tid, _name, type_kr, estimated, difficulty_kr in REAL_TASKS:
         req = _build_request(estimated, type_kr, difficulty_kr)
         result = estimate_initial_duration(req)
 
-        ratio = result.predictedMinutes / estimated
+        ratio = result.aiEstimatedMinutes / estimated
         total_estimated += estimated
-        total_predicted += result.predictedMinutes
+        total_ai_estimated += result.aiEstimatedMinutes
 
         print(f"{user:<4} {tid:>3} | {type_kr:<4} {difficulty_kr:<4} | "
-              f"{estimated:>5.0f} → {result.predictedMinutes:>6.1f}  ({ratio:>5.1%})")
+              f"{estimated:>5.0f} → {result.aiEstimatedMinutes:>6.1f}  ({ratio:>5.1%})")
 
-        assert result.predictedMinutes > 0
+        assert result.aiEstimatedMinutes > 0
         assert result.stage == "RULE"
 
     print("-" * 60)
-    overall_ratio = total_predicted / total_estimated
+    overall_ratio = total_ai_estimated / total_estimated
     print(f"{'합계':<4} {'':>3} | {'':<4} {'':<4} | "
-          f"{total_estimated:>5.0f} → {total_predicted:>6.1f}  ({overall_ratio:>5.1%})")
+          f"{total_estimated:>5.0f} → {total_ai_estimated:>6.1f}  ({overall_ratio:>5.1%})")
 
 
 # ---------- 사용자별 누적 시뮬레이션 -----------------------------------
 
 
-def test_predict_per_user_with_sequential_completed_count():
+def test_estimate_per_user_with_sequential_completed_count():
     """사용자별로 completedCount를 0부터 순차 증가시켜 예측.
 
     실 사용 시 Spring은 사용자별 누적 완료 수를 보내므로 그 흐름을 흉내낸다.
@@ -222,7 +222,7 @@ REAL_TASKS_WITH_ACTUAL = [
 ]
 
 
-def test_simulate_predict_update_cycle_per_user():
+def test_simulate_estimate_update_cycle_per_user():
     """실제 서비스 흐름 시뮬레이션:
        사용자별로 예측 → 실제 측정 → 계수 업데이트 → 다음 예측 반영.
     """
@@ -259,8 +259,8 @@ def test_simulate_predict_update_cycle_per_user():
         diff_code = DIFFICULTY_MAP[diff_kr]
 
         # 1) 현재 누적 계수로 예측
-        pred = estimate_initial_duration(
-            PredictRequest(
+        estimate_result = estimate_initial_duration(
+            EstimateRequest(
                 estimatedMinutes=estimated,
                 completedCount=completed,
                 taskType=task_type_code,
@@ -278,7 +278,7 @@ def test_simulate_predict_update_cycle_per_user():
                 systemDifficultyEffect=SYSTEM_DIFFICULTY_EFFECT,
             )
         )
-        error = (pred.predictedMinutes - actual) / actual
+        error = (estimate_result.aiEstimatedMinutes - actual) / actual
 
         # 2) 실제값으로 계수 업데이트
         upd = update_coefficients(
@@ -320,12 +320,12 @@ def test_simulate_predict_update_cycle_per_user():
             mark = ""
         print(
             f"{tid:>3} | {type_kr:<4} {diff_kr:<4} | "
-            f"{estimated:>4.0f} {pred.predictedMinutes:>6.1f} {actual:>5.0f} | "
+            f"{estimated:>4.0f} {estimate_result.aiEstimatedMinutes:>6.1f} {actual:>5.0f} | "
             f"{error:>+7.1%} | {upd.userGlobal:>+6.3f} {residual_for_type:>+10.3f}"
             f"{mark}"
         )
 
-        assert pred.predictedMinutes > 0
+        assert estimate_result.aiEstimatedMinutes > 0
 
     # 최종 학습된 계수 출력
     print()
@@ -367,7 +367,7 @@ def test_correction_direction_by_type_and_difficulty(type_kr, difficulty_kr, exp
 
     req = _build_request(estimated, type_kr, difficulty_kr)
     result = estimate_initial_duration(req)
-    ratio = result.predictedMinutes / estimated
+    ratio = result.aiEstimatedMinutes / estimated
 
     if expect_ratio_gt_baseline:
         assert ratio > baseline_ratio

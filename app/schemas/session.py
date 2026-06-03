@@ -22,7 +22,7 @@ class SessionRemainingRequest(BaseModel):
         ...,
         description=(
             "직전 AI 예측 총 소요시간(분). "
-            "첫 세션 종료 시에는 최초 예측값, 이후에는 직전 updatedAiTotalMinutes를 사용한다. "
+            "첫 세션 종료 시에는 최초 예상값, 이후에는 직전 updatedAiTotalMinutes를 사용한다. "
         ),
     )
 

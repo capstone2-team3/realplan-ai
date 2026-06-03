@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from app.schemas.predict import PredictRequest, PredictResponse
+from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
 from app.services.initial_estimator.base import PlanningStage
 from app.services.initial_estimator.constants import STAGE_RULE
@@ -21,7 +21,7 @@ from app.services.initial_estimator.update_policy import (
 class RuleStage(PlanningStage):
     """systemGlobalPrior, type effect, difficulty effect만 사용하는 stage."""
 
-    def predict(self, req: PredictRequest) -> PredictResponse:
+    def estimate(self, req: EstimateRequest) -> EstimateResponse:
         validate_estimated_minutes(req.estimatedMinutes)
 
         log_correction = (
@@ -31,8 +31,8 @@ class RuleStage(PlanningStage):
         )
         correction_factor = math.exp(log_correction)
 
-        return PredictResponse(
-            predictedMinutes=req.estimatedMinutes * correction_factor,
+        return EstimateResponse(
+            aiEstimatedMinutes=req.estimatedMinutes * correction_factor,
             correctionFactor=correction_factor,
             logCorrection=log_correction,
             stage=STAGE_RULE,

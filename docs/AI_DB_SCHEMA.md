@@ -18,7 +18,7 @@
 | 사용자 계수 | `user_ai_difficulty_residual` | 사용자별 difficulty residual 저장 |
 | 사용자 계수 | `user_ai_folder_residual` | 사용자별 folder residual 저장 |
 | 시스템 prior | `ai_system_prior` | 신규/초기 사용자에게 적용할 시스템 기본 계수 저장 |
-| 예측 로그 | `ai_prediction_log` | `/tasks/estimate` 예측 결과와 입력 스냅샷 저장 |
+| 예측 로그 | `ai_estimation_log` | `/tasks/estimate` 예상 결과와 입력 스냅샷 저장 |
 | 업데이트 로그 | `ai_coefficient_update_log` | `/users/planning-error-rates` 계수 갱신 결과와 전후 스냅샷 저장 |
 
 ## 기존 테이블 확장
@@ -76,7 +76,7 @@
 AI 예측은 로그 계수 기반으로 동작합니다.
 
 ```text
-predictedMinutes = estimatedMinutes * exp(logCorrection)
+aiEstimatedMinutes = estimatedMinutes * exp(logCorrection)
 ```
 
 사용자별 계수는 global 계수와 type/difficulty/folder residual로 나누어 저장합니다.
@@ -201,20 +201,20 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 
 ## 예측 로그 테이블
 
-### `ai_prediction_log`
+### `ai_estimation_log`
 
 `/tasks/estimate` 호출 결과를 저장하는 로그 테이블입니다. 예측 당시 어떤 입력과 계수로 결과가 나왔는지 추적하기 위한 용도입니다.
 
 | 컬럼 | 타입 | API 필드 | 설명 |
 |---|---|---|---|
-| `prediction_id` | `BIGSERIAL` | 없음 | PK |
+| `estimation_id` | `BIGSERIAL` | 없음 | PK |
 | `task_id` | `BIGINT` | 없음 | 예측 대상 태스크 FK |
 | `user_id` | `BIGINT` | 없음 | 사용자 FK |
 | `estimated_minutes` | `INTEGER` | 요청 `estimatedMinutes` | 사용자가 입력한 원래 예상 시간 |
-| `predicted_minutes` | `NUMERIC(10, 2)` | 응답 `predictedMinutes` | AI가 보정한 예상 시간 |
+| `ai_estimated_minutes` | `NUMERIC(10, 2)` | 응답 `aiEstimatedMinutes` | AI가 보정한 예상 시간 |
 | `correction_factor` | `NUMERIC(10, 6)` | 응답 `correctionFactor` | `exp(logCorrection)` 값 |
 | `log_correction` | `NUMERIC(10, 6)` | 응답 `logCorrection` | 최종 로그 보정값 |
-| `stage` | `VARCHAR(50)` | 응답 `stage` | 예측 단계. 예: `RULE`, `AVERAGE_BASELINE` |
+| `stage` | `VARCHAR(50)` | 응답 `stage` | 예상 단계. 예: `RULE`, `AVERAGE_BASELINE` |
 | `input_snapshot` | `JSONB` | 요청 전체 또는 주요 입력 | 예측 당시 입력값과 사용 계수 스냅샷 |
 | `created_at` | `TIMESTAMP(6)` | 없음 | 로그 생성 시각 |
 
@@ -328,9 +328,9 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 
 1. 백엔드가 DB에서 사용자 계수와 시스템 prior를 조회합니다.
 2. 조회한 값을 API 요청의 `userGlobal`, `userTypeResidual`, `userDifficultyResidual`, `userFolderResidual`, `systemGlobalPrior`, `systemTypeEffect`, `systemDifficultyEffect`로 변환합니다.
-3. Python API가 `predictedMinutes`, `correctionFactor`, `logCorrection`, `stage`를 반환합니다.
-4. 백엔드는 태스크의 AI 예측값과 `task.last_ai_estimated_at`을 갱신합니다.
-5. 필요하면 `ai_prediction_log`에 입력 스냅샷과 결과를 저장합니다.
+3. Python API가 `aiEstimatedMinutes`, `correctionFactor`, `logCorrection`, `stage`를 반환합니다.
+4. 백엔드는 태스크의 AI 예상값과 `task.last_ai_estimated_at`을 갱신합니다.
+5. 필요하면 `ai_estimation_log`에 입력 스냅샷과 결과를 저장합니다.
 
 ### `/users/planning-error-rates`
 

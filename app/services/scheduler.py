@@ -231,7 +231,7 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
 
 
 def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
-    """사용자 보정값을 최우선으로 보고, 없으면 AI 예측값까지 순서대로 fallback한다."""
+    """사용자 보정값을 최우선으로 보고, 없으면 AI 예상값까지 순서대로 fallback한다."""
 
     for minutes in (
         task.finalEstimatedMinutes,
