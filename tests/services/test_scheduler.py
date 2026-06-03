@@ -19,6 +19,7 @@ def _task(
     *,
     due_date: date | None = None,
     priority: str | None = "medium",
+    status: str = "PENDING",
     final_minutes: int | None = 60,
     actual_minutes: int | None = 0,
     scheduled_minutes: int | None = 0,
@@ -28,6 +29,7 @@ def _task(
         title=f"task-{task_id}",
         dueDate=due_date,
         priority=priority,
+        status=status,
         finalEstimatedMinutes=final_minutes,
         totalActualMinutes=actual_minutes,
         activeScheduledMinutes=scheduled_minutes,
@@ -60,6 +62,18 @@ def test_remaining_zero_is_excluded_even_if_due_today():
 
     assert response.recommendations == []
     assert response.message == "추천할 미완료 태스크가 없어요."
+
+
+def test_completed_status_is_excluded():
+    response = _recommend(
+        [
+            _task(1, status="COMPLETED", final_minutes=60),
+            _task(2, status="PENDING", final_minutes=60),
+            _task(3, status="IN_PROGRESS", final_minutes=60),
+        ]
+    )
+
+    assert [item.taskId for item in response.recommendations] == [2, 3]
 
 
 def test_due_today_tasks_are_selected_before_general_tasks():

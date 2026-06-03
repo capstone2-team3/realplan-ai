@@ -105,3 +105,28 @@ def test_method_not_allowed_uses_common_format():
     _assert_common_response(body, "FAIL", "/tasks/estimate")
     assert body["success"] is None
     assert body["error"]["code"] == "METHOD_NOT_ALLOWED"
+
+
+def test_invalid_task_status_is_rejected():
+    response = client.post(
+        "/tasks/recommend",
+        json={
+            "targetDate": "2026-05-29",
+            "availableStart": "09:00",
+            "availableEnd": "12:00",
+            "tasks": [
+                {
+                    "taskId": 1,
+                    "title": "task",
+                    "status": "TODO",
+                    "finalEstimatedMinutes": 60,
+                }
+            ],
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 422
+    _assert_common_response(body, "FAIL", "/tasks/recommend")
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "status" in body["error"]["message"]

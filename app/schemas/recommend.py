@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
 
 
 class RecommendCandidateDTO(BaseModel):
@@ -17,7 +20,7 @@ class RecommendCandidateDTO(BaseModel):
     title: str
     dueDate: date | datetime | None = None
     priority: str | None = None
-    status: str | None = None
+    status: TaskStatus
     finalEstimatedMinutes: int | None = Field(default=None, gt=0)
     userAdjustedEstimatedMinutes: int | None = Field(default=None, gt=0)
     aiEstimatedMinutes: int | None = Field(default=None, gt=0)

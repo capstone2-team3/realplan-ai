@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time
+from typing import Literal
 
 
 MAX_RECOMMENDATION_COUNT = 4
 NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."
+TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
 
 
 @dataclass(frozen=True)
@@ -21,7 +23,7 @@ class CandidateTask:
     title: str
     dueDate: date | datetime | None = None
     priority: str | None = None
-    status: str | None = None
+    status: TaskStatus = "PENDING"
     finalEstimatedMinutes: int | None = None
     userAdjustedEstimatedMinutes: int | None = None
     aiEstimatedMinutes: int | None = None
@@ -244,9 +246,9 @@ def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
 
 
 def _is_excluded_status(status: str | None) -> bool:
-    """완료/삭제/보관 상태는 추천 후보에서 제외한다."""
+    """완료 상태는 추천 후보에서 제외한다."""
 
-    return (status or "").lower() in {"completed", "done", "deleted", "archived"}
+    return status == "COMPLETED"
 
 
 def _candidate_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, int]:
