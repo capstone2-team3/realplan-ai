@@ -54,7 +54,7 @@ def test_validate_request_rejects_duplicate_task_id():
             dict(
                 taskId=1,
                 title="B",
-                taskType="SATISFACTION",
+                taskType="SATISFACTION_BASED",
                 difficulty="MEDIUM",
                 targetMinutes=60,
             ),
@@ -101,7 +101,7 @@ def test_fallback_uses_stable_60_minute_chunks(target_minutes, expected):
             dict(
                 taskId=1,
                 title="발표자료 수정",
-                taskType="SATISFACTION",
+                taskType="SATISFACTION_BASED",
                 difficulty="MEDIUM",
                 targetMinutes=target_minutes,
             )

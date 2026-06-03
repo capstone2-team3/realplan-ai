@@ -81,7 +81,7 @@ uv run pytest
 ## 핵심 모델
 
 - **분류기 (`services/classifier`)** — Task 이름을 3가지 유형으로 분류
-  - `TIME_BOUND` (시간형) / `SCOPE_BOUND` (분량형) / `SATISFACTION_BOUND` (만족형)
+  - `TIME_BASED` (시간형) / `QUANTITY_BASED` (분량형) / `SATISFACTION_BASED` (만족형)
   - 사용자 과거 이력이 있으면 `PersonalizationLayer`로 일관성 유지
 - **예측기 (`services/predictor`)** — `corrected = user_estimate × multiplier`
   - 유형별 베이스 계수 × 난이도 가중치

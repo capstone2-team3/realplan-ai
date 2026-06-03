@@ -36,7 +36,7 @@ from app.services.initial_estimator.training_record import build_initial_trainin
 
 
 SYSTEM_GLOBAL = 0.1
-SYSTEM_TYPE = {"SATISFACTION": 0.05, "PROBLEM_SOLVING": -0.02}
+SYSTEM_TYPE = {"SATISFACTION_BASED": 0.05, "PROBLEM_SOLVING": -0.02}
 SYSTEM_DIFFICULTY = {"EASY": -0.03, "NORMAL": 0.0, "HARD": 0.08}
 SYSTEM_PRIORITY = {"HIGH": 0.07, "LOW": -0.04}
 
@@ -45,7 +45,7 @@ def _make_predict_request(**overrides):
     base = dict(
         estimatedMinutes=60.0,
         completedCount=0,
-        taskType="SATISFACTION",
+        taskType="SATISFACTION_BASED",
         difficulty="NORMAL",
         folderId=None,
         userGlobal=None,
@@ -69,7 +69,7 @@ def _make_update_request(**overrides):
         estimatedMinutes=60.0,
         actualMinutes=90.0,
         completedCount=0,
-        taskType="SATISFACTION",
+        taskType="SATISFACTION_BASED",
         difficulty="NORMAL",
         folderId=None,
         userGlobal=None,
@@ -94,10 +94,10 @@ def _make_update_request(**overrides):
 def test_early_stage_alias_uses_average_baseline_formula():
     """EarlyStage legacy alias도 average baseline 공식을 사용한다."""
     stage = EarlyStage()
-    req = _make_predict_request(taskType="SATISFACTION", difficulty="HARD")
+    req = _make_predict_request(taskType="SATISFACTION_BASED", difficulty="HARD")
     result = stage.predict(req)
 
-    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION"] + SYSTEM_DIFFICULTY["HARD"]
+    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION_BASED"] + SYSTEM_DIFFICULTY["HARD"]
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
     assert math.isclose(result.correctionFactor, math.exp(expected_log), rel_tol=1e-9)
     assert math.isclose(
@@ -157,7 +157,7 @@ def test_rule_stage_ignores_legacy_priority_fields():
     high_result = stage.predict(high_req)
     low_result = stage.predict(low_req)
 
-    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION"]
+    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION_BASED"]
     assert math.isclose(high_result.logCorrection, expected_log, rel_tol=1e-9)
     assert math.isclose(low_result.logCorrection, expected_log, rel_tol=1e-9)
     assert math.isclose(
@@ -188,8 +188,8 @@ def test_average_stage_ignores_legacy_priority_fields():
     base = dict(
         completedCount=30,
         userGlobal=0.2,
-        userTypeResidual={"SATISFACTION": 0.3},
-        typeCount={"SATISFACTION": 10},
+        userTypeResidual={"SATISFACTION_BASED": 0.3},
+        typeCount={"SATISFACTION_BASED": 10},
         systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
     )
     high_result = stage.predict(_make_predict_request(priority="HIGH", **base))
@@ -229,14 +229,14 @@ def test_update_returns_new_global_and_residual():
     req = _make_update_request(
         estimatedMinutes=60.0,
         actualMinutes=90.0,
-        taskType="SATISFACTION",
+        taskType="SATISFACTION_BASED",
         difficulty="NORMAL",
         folderId="folder-1",
         userGlobal=0.0,
-        userTypeResidual={"SATISFACTION": 0.0},
+        userTypeResidual={"SATISFACTION_BASED": 0.0},
         userDifficultyResidual={"NORMAL": 0.0},
         userFolderResidual={"folder-1": 0.0},
-        typeCount={"SATISFACTION": 5},
+        typeCount={"SATISFACTION_BASED": 5},
         difficultyCount={"NORMAL": 2},
         folderCount={"folder-1": 4},
     )
@@ -248,7 +248,7 @@ def test_update_returns_new_global_and_residual():
     residual_target = (
         clamped
         - 0.0
-        - SYSTEM_TYPE["SATISFACTION"]
+        - SYSTEM_TYPE["SATISFACTION_BASED"]
         - SYSTEM_DIFFICULTY["NORMAL"]
     )
     expected_residual = (1 - ETA_TYPE) * 0.0 + ETA_TYPE * residual_target
@@ -271,7 +271,7 @@ def test_update_returns_new_global_and_residual():
     )
     assert math.isclose(result.userGlobal, expected_global, rel_tol=1e-9)
     assert math.isclose(
-        result.userTypeResidual["SATISFACTION"], expected_residual, rel_tol=1e-9
+        result.userTypeResidual["SATISFACTION_BASED"], expected_residual, rel_tol=1e-9
     )
     assert math.isclose(
         result.userDifficultyResidual["NORMAL"],
@@ -283,7 +283,7 @@ def test_update_returns_new_global_and_residual():
         expected_folder_residual,
         rel_tol=1e-9,
     )
-    assert result.typeCount["SATISFACTION"] == 6
+    assert result.typeCount["SATISFACTION_BASED"] == 6
     assert result.difficultyCount["NORMAL"] == 3
     assert result.folderCount["folder-1"] == 5
     assert result.stage == STAGE_AVERAGE_BASELINE
@@ -294,10 +294,10 @@ def test_update_residual_target_ignores_legacy_priority_fields():
     base = dict(
         estimatedMinutes=60.0,
         actualMinutes=90.0,
-        taskType="SATISFACTION",
+        taskType="SATISFACTION_BASED",
         difficulty="NORMAL",
         userGlobal=0.0,
-        userTypeResidual={"SATISFACTION": 0.0},
+        userTypeResidual={"SATISFACTION_BASED": 0.0},
         userDifficultyResidual={"NORMAL": 0.0},
         systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
     )
@@ -306,8 +306,8 @@ def test_update_residual_target_ignores_legacy_priority_fields():
     low_result = stage.update(_make_update_request(priority="LOW", **base))
 
     assert math.isclose(
-        high_result.userTypeResidual["SATISFACTION"],
-        low_result.userTypeResidual["SATISFACTION"],
+        high_result.userTypeResidual["SATISFACTION_BASED"],
+        low_result.userTypeResidual["SATISFACTION_BASED"],
         rel_tol=1e-9,
     )
     assert math.isclose(
@@ -382,7 +382,7 @@ def test_update_upper_boundary_is_not_dropped():
         estimatedMinutes=100.0,
         actualMinutes=800.0,
         userGlobal=0.0,
-        typeCount={"SATISFACTION": 0},
+        typeCount={"SATISFACTION_BASED": 0},
     )
     result = stage.update(req)
 
@@ -391,7 +391,7 @@ def test_update_upper_boundary_is_not_dropped():
     # clamp는 적용된다 (log(8.0) > log(4.0))
     assert math.isclose(result.clampedLogRatio, CLAMP_MAX, rel_tol=1e-9)
     # 정상 학습 → typeCount 증가
-    assert result.typeCount["SATISFACTION"] == 1
+    assert result.typeCount["SATISFACTION_BASED"] == 1
 
 
 def test_update_above_upper_drop_threshold_is_dropped():
@@ -401,8 +401,8 @@ def test_update_above_upper_drop_threshold_is_dropped():
         estimatedMinutes=100.0,
         actualMinutes=801.0,
         userGlobal=0.42,
-        userTypeResidual={"SATISFACTION": 0.15},
-        typeCount={"SATISFACTION": 7},
+        userTypeResidual={"SATISFACTION_BASED": 0.15},
+        typeCount={"SATISFACTION_BASED": 7},
     )
     result = stage.update(req)
 
@@ -411,9 +411,9 @@ def test_update_above_upper_drop_threshold_is_dropped():
     assert "exceeds DROP_RATIO_MAX" in result.dropReason
     # 계수 불변
     assert result.userGlobal == 0.42
-    assert result.userTypeResidual == {"SATISFACTION": 0.15}
+    assert result.userTypeResidual == {"SATISFACTION_BASED": 0.15}
     # typeCount 증가하지 않음
-    assert result.typeCount == {"SATISFACTION": 7}
+    assert result.typeCount == {"SATISFACTION_BASED": 7}
     # logRatio는 그대로 보고, clampedLogRatio는 참고용 상한값
     assert math.isclose(result.logRatio, math.log(8.01), rel_tol=1e-9)
     assert math.isclose(result.clampedLogRatio, CLAMP_MAX, rel_tol=1e-9)
@@ -428,14 +428,14 @@ def test_update_lower_boundary_is_not_dropped():
         estimatedMinutes=100.0,
         actualMinutes=10.0,
         userGlobal=0.0,
-        typeCount={"SATISFACTION": 3},
+        typeCount={"SATISFACTION_BASED": 3},
     )
     result = stage.update(req)
 
     assert result.dropped is False
     assert result.dropReason is None
     assert math.isclose(result.clampedLogRatio, CLAMP_MIN, rel_tol=1e-9)
-    assert result.typeCount["SATISFACTION"] == 4
+    assert result.typeCount["SATISFACTION_BASED"] == 4
 
 
 def test_update_below_lower_drop_threshold_is_dropped():
@@ -445,8 +445,8 @@ def test_update_below_lower_drop_threshold_is_dropped():
         estimatedMinutes=100.0,
         actualMinutes=9.0,
         userGlobal=-0.1,
-        userTypeResidual={"SATISFACTION": -0.05},
-        typeCount={"SATISFACTION": 2},
+        userTypeResidual={"SATISFACTION_BASED": -0.05},
+        typeCount={"SATISFACTION_BASED": 2},
     )
     result = stage.update(req)
 
@@ -454,8 +454,8 @@ def test_update_below_lower_drop_threshold_is_dropped():
     assert result.dropReason is not None
     assert "below DROP_RATIO_MIN" in result.dropReason
     assert result.userGlobal == -0.1
-    assert result.userTypeResidual == {"SATISFACTION": -0.05}
-    assert result.typeCount == {"SATISFACTION": 2}
+    assert result.userTypeResidual == {"SATISFACTION_BASED": -0.05}
+    assert result.typeCount == {"SATISFACTION_BASED": 2}
     assert math.isclose(result.logRatio, math.log(0.09), rel_tol=1e-9)
     assert math.isclose(result.clampedLogRatio, CLAMP_MIN, rel_tol=1e-9)
 
@@ -550,17 +550,17 @@ def test_router_update_always_uses_average_stage():
     req = _make_update_request(completedCount=120)
     result = router.update(req)
     assert result.stage == STAGE_AVERAGE_BASELINE
-    assert result.typeCount["SATISFACTION"] == 1
+    assert result.typeCount["SATISFACTION_BASED"] == 1
     assert result.difficultyCount["NORMAL"] == 1
 
 
 def test_training_record_contains_update_snapshot():
     req = _make_update_request(
         userGlobal=0.2,
-        userTypeResidual={"SATISFACTION": 0.1},
+        userTypeResidual={"SATISFACTION_BASED": 0.1},
         userDifficultyResidual={"NORMAL": -0.1},
         userFolderResidual={"folder-1": 0.3},
-        typeCount={"SATISFACTION": 3},
+        typeCount={"SATISFACTION_BASED": 3},
         difficultyCount={"NORMAL": 2},
         folderCount={"folder-1": 4},
         folderId="folder-1",
@@ -577,7 +577,7 @@ def test_training_record_contains_update_snapshot():
 
     assert record["task_id"] == 11
     assert record["user_id"] == 22
-    assert record["task_type"] == "SATISFACTION"
+    assert record["task_type"] == "SATISFACTION_BASED"
     assert record["folder_id"] == "folder-1"
     assert math.isclose(record["planning_error_ratio"], 90.0 / 60.0, rel_tol=1e-9)
     assert math.isclose(

@@ -105,7 +105,7 @@ def classify_task(
 def _fallback(reason: str) -> ClassifyOutput:
     """LLM 호출 실패 시 보수적 기본값. 가장 보정을 많이 해주는 만족형으로 폴백."""
     return ClassifyOutput(
-        task_type=TaskType.SATISFACTION_BOUND,
+        task_type=TaskType.SATISFACTION_BASED,
         reason=f"[fallback] {reason}",
         source="fallback",
     )

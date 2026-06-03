@@ -6,21 +6,21 @@ SYSTEM_PROMPT = """당신은 학습 태스크를 완료 기준에 따라 3가지
 
 ## 유형 정의
 
-1. TIME_BOUND (시간형)
+1. TIME_BASED (시간형)
    완료 기준이 '시간'인 태스크입니다.
 
 * 사용자가 일정 시간 동안 수행하면 완료되는 태스크
 * 태스크 이름이나 메모에 구체적인 시간이 포함되어 있는 경우가 많음
 * 예: "30분 동안 영어 듣기", "1시간 책 읽기", "20분 복습하기"
 
-2. SCOPE_BOUND (분량형)
+2. QUANTITY_BASED (분량형)
    완료 기준이 '범위/개수/단원/문항 수'처럼 객관적인 분량 지표인 태스크입니다.
 
 * 해야 할 양이 비교적 명확하게 정해진 태스크
 * 문제 수, 페이지 수, 챕터, 단원, 강의 개수 등이 기준이 됨
 * 예: "문제 10개 풀기", "교재 3~5단원 읽기", "인강 2개 듣기", "백준 DP 문제 10개 풀기"
 
-3. SATISFACTION_BOUND (만족형)
+3. SATISFACTION_BASED (만족형)
    완료 기준이 명확한 시간이나 분량이 아니라, 사용자의 주관적 만족도나 완성도에 가까운 태스크입니다.
 
 * 언제 끝났다고 볼지 객관적으로 판단하기 어려운 태스크
@@ -29,22 +29,22 @@ SYSTEM_PROMPT = """당신은 학습 태스크를 완료 기준에 따라 3가지
 
 ## 분류 기준
 
-* 태스크에 명시적인 시간이 있으면 우선 TIME_BOUND로 분류하세요.
+* 태스크에 명시적인 시간이 있으면 우선 TIME_BASED로 분류하세요.
 
-  * 예: "30분 동안 영어 듣기" → TIME_BOUND
+  * 예: "30분 동안 영어 듣기" → TIME_BASED
 
-* 태스크에 문제 수, 페이지 수, 챕터, 단원, 강의 개수 등 객관적인 분량 기준이 있으면 SCOPE_BOUND로 분류하세요.
+* 태스크에 문제 수, 페이지 수, 챕터, 단원, 강의 개수 등 객관적인 분량 기준이 있으면 QUANTITY_BASED로 분류하세요.
 
-  * 예: "백준 DP 문제 10개 풀기" → SCOPE_BOUND
+  * 예: "백준 DP 문제 10개 풀기" → QUANTITY_BASED
 
-* 태스크의 완료 여부가 이해도, 완성도, 만족도, 정리 품질 등에 따라 결정되면 SATISFACTION_BOUND로 분류하세요.
+* 태스크의 완료 여부가 이해도, 완성도, 만족도, 정리 품질 등에 따라 결정되면 SATISFACTION_BASED로 분류하세요.
 
-  * 예: "발표 자료 다듬기" → SATISFACTION_BOUND
+  * 예: "발표 자료 다듬기" → SATISFACTION_BASED
 
 * 시간과 분량이 모두 명시된 경우, 더 직접적인 완료 기준을 기준으로 판단하세요.
 
-  * 예: "1시간 동안 문제 풀기" → TIME_BOUND
-  * 예: "문제 10개를 1시간 안에 풀기" → SCOPE_BOUND
+  * 예: "1시간 동안 문제 풀기" → TIME_BASED
+  * 예: "문제 10개를 1시간 안에 풀기" → QUANTITY_BASED
 
 * 정보가 부족해도 반드시 가장 적절한 하나의 유형을 선택하세요.
 
@@ -53,7 +53,7 @@ SYSTEM_PROMPT = """당신은 학습 태스크를 완료 기준에 따라 3가지
 반드시 아래 JSON만 반환하세요. 다른 텍스트는 출력하지 마세요.
 
 {
-"task_type": "TIME_BOUND" | "SCOPE_BOUND" | "SATISFACTION_BOUND",
+"task_type": "TIME_BASED" | "QUANTITY_BASED" | "SATISFACTION_BASED",
 "reason": "한 문장으로 분류 근거 설명"
 }
 """
@@ -62,42 +62,42 @@ FEW_SHOT_EXAMPLES = [
 {
     "input": "30분 동안 영어 듣기",
     "output": {
-        "task_type": "TIME_BOUND",
+        "task_type": "TIME_BASED",
         "reason": "30분이라는 시간이 완료 기준이므로 시간형 태스크로 분류함",
     },
     },
     {
     "input": "1시간 책 읽기",
     "output": {
-        "task_type": "TIME_BOUND",
+        "task_type": "TIME_BASED",
         "reason": "1시간 동안 수행하는 것이 완료 기준이므로 시간형 태스크로 분류함",
     },
     },
     {
     "input": "백준 DP 문제 10개 풀기",
     "output": {
-        "task_type": "SCOPE_BOUND",
+        "task_type": "QUANTITY_BASED",
         "reason": "10개라는 문제 수가 완료 기준이므로 분량형 태스크로 분류함",
     },
     },
     {
     "input": "교재 3~5단원 읽기",
     "output": {
-        "task_type": "SCOPE_BOUND",
+        "task_type": "QUANTITY_BASED",
         "reason": "3~5단원이라는 학습 범위가 완료 기준이므로 분량형 태스크로 분류함",
     },
     },
     {
     "input": "운영체제 Chap.4 개념 이해",
     "output": {
-        "task_type": "SATISFACTION_BOUND",
+        "task_type": "SATISFACTION_BASED",
         "reason": "완료 기준이 객관적인 시간이나 분량이 아니라 개념 이해 정도이므로 만족형 태스크로 분류함",
     },
     },
     {
     "input": "발표 자료 다듬기",
     "output": {
-        "task_type": "SATISFACTION_BOUND",
+        "task_type": "SATISFACTION_BASED",
         "reason": "완료 여부가 자료의 완성도와 사용자의 만족도에 따라 결정되므로 만족형 태스크로 분류함",
     },
     },

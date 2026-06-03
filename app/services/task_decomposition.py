@@ -90,7 +90,7 @@ Use title and taskType to create natural session divisions.
 
 taskType is one of:
 - TIME_BASED
-- SATISFACTION
+- SATISFACTION_BASED
 - QUANTITY_BASED
 
 TIME_BASED:
@@ -100,7 +100,7 @@ TIME_BASED:
 - Do not over-decompose unless targetMinutes is long.
 - Example: 90 minutes -> 60 + 30.
 
-SATISFACTION:
+SATISFACTION_BASED:
 - The task ends when the user feels sufficiently satisfied.
 - Prefer 30-minute or 60-minute sessions.
 - Avoid overly long sessions.

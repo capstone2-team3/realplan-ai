@@ -12,7 +12,7 @@ class PredictRequest(BaseModel):
     completedCount: int = Field(..., description="해당 사용자의 완료 태스크 누적 개수")
     taskType: str = Field(
         ...,
-        description="태스크 유형 (예: TIME_BOUND / SCOPE_BOUND / SATISFACTION_BOUND)",
+        description="태스크 유형 (예: TIME_BASED / QUANTITY_BASED / SATISFACTION_BASED)",
     )
     difficulty: str = Field(..., description="난이도 (예: EASY / NORMAL / HARD)")
     priority: Optional[str] = Field(

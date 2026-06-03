@@ -8,9 +8,9 @@ from typing import Optional
 
 
 class TaskType(str, Enum):
-    TIME_BOUND = "TIME_BOUND"                   # 시간형
-    SCOPE_BOUND = "SCOPE_BOUND"                 # 분량형
-    SATISFACTION_BOUND = "SATISFACTION_BOUND"   # 만족형
+    TIME_BASED = "TIME_BASED"                   # 시간형
+    QUANTITY_BASED = "QUANTITY_BASED"           # 분량형
+    SATISFACTION_BASED = "SATISFACTION_BASED"               # 만족형
 
 
 @dataclass

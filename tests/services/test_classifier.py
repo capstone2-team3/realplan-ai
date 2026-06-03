@@ -28,7 +28,7 @@ class FakeClient:
 def test_classify_task_returns_task_type_contract():
     content = json.dumps(
         {
-            "task_type": "SCOPE_BOUND",
+            "task_type": "QUANTITY_BASED",
             "reason": "문제 수가 완료 기준이므로 분량형 태스크로 분류함",
         },
         ensure_ascii=False,
@@ -39,7 +39,7 @@ def test_classify_task_returns_task_type_contract():
         client=FakeClient(content),
     )
 
-    assert result.task_type == TaskType.SCOPE_BOUND
+    assert result.task_type == TaskType.QUANTITY_BASED
     assert result.reason == "문제 수가 완료 기준이므로 분량형 태스크로 분류함"
     assert result.source == "llm"
 
@@ -50,7 +50,7 @@ def test_fallback_output_contract():
         client=FakeClient("not-json"),
     )
 
-    assert result.task_type == TaskType.SATISFACTION_BOUND
+    assert result.task_type == TaskType.SATISFACTION_BASED
     assert result.source == "fallback"
 
 
@@ -61,26 +61,26 @@ def test_history_match_output_contract():
             user_history=[
                 HistoricalTask(
                     name="운영체제 Chap.3 정리",
-                    task_type=TaskType.SATISFACTION_BOUND,
+                    task_type=TaskType.SATISFACTION_BASED,
                 )
             ],
         ),
         client=FakeClient(None),
     )
 
-    assert result.task_type == TaskType.SATISFACTION_BOUND
+    assert result.task_type == TaskType.SATISFACTION_BASED
     assert result.source == "history_match"
 
 
 def test_classify_response_schema_contract():
     response = ClassifyResponse(
-        task_type=TaskType.TIME_BOUND,
+        task_type=TaskType.TIME_BASED,
         reason="30분이라는 시간이 완료 기준이므로 시간형 태스크로 분류함",
         source="llm",
     )
 
     assert response.model_dump() == {
-        "task_type": TaskType.TIME_BOUND,
+        "task_type": TaskType.TIME_BASED,
         "reason": "30분이라는 시간이 완료 기준이므로 시간형 태스크로 분류함",
         "source": "llm",
     }

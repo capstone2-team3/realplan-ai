@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-TaskType = Literal["TIME_BASED", "SATISFACTION", "QUANTITY_BASED"]
+TaskType = Literal["TIME_BASED", "SATISFACTION_BASED", "QUANTITY_BASED"]
 TaskDifficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 RequiredFocusLevel = Literal["HIGH", "MEDIUM", "LOW", "FLEXIBLE"]
 

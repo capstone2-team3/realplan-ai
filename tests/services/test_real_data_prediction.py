@@ -79,9 +79,9 @@ def _print_formula_header():
 # ---------- 한국어 → API 코드 매핑 -------------------------------------
 
 TASK_TYPE_MAP = {
-    "만족형": "SATISFACTION_BOUND",
-    "분량형": "SCOPE_BOUND",
-    "시간형": "TIME_BOUND",
+    "만족형": "SATISFACTION_BASED",
+    "분량형": "QUANTITY_BASED",
+    "시간형": "TIME_BASED",
 }
 
 # '모름'은 systemDifficultyEffect에 키가 없도록 두어 effect=0으로 fallback시킨다.
@@ -98,9 +98,9 @@ DIFFICULTY_MAP = {
 
 SYSTEM_GLOBAL_PRIOR = 0.25
 SYSTEM_TYPE_EFFECT = {
-    "SATISFACTION_BOUND": +0.10,   # 끝맺기 기준 불명확 → 더 오래 걸림
-    "SCOPE_BOUND":         0.00,   # 분량형은 비교적 예측이 정확
-    "TIME_BOUND":         -0.10,   # 마감 강제력으로 시간 안에 끝남
+    "SATISFACTION_BASED":   +0.10,   # 끝맺기 기준 불명확 → 더 오래 걸림
+    "QUANTITY_BASED":  0.00,   # 분량형은 비교적 예측이 정확
+    "TIME_BASED":     -0.10,   # 마감 강제력으로 시간 안에 끝남
 }
 SYSTEM_DIFFICULTY_EFFECT = {
     "EASY":   -0.10,
