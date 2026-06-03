@@ -9,6 +9,8 @@ from collections import Counter, defaultdict
 from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import BaseModel
+
 from app.schemas.tasks import (
     TaskDecompositionRequest,
     TaskDecompositionResponse,
@@ -45,8 +47,7 @@ Return exactly this JSON structure:
   "taskSessions": [
     {
       "taskId": 101,
-      "sessionMinutes": 60,
-      "requiredFocusLevel": "HIGH"
+      "sessionMinutes": 60
     }
   ]
 }
@@ -64,25 +65,6 @@ SESSION LENGTH RULES
 9. If targetMinutes is greater than maxContinuousSchedulableMinutes, split it into multiple sessions, each no longer than maxContinuousSchedulableMinutes.
 10. If targetMinutes is less than 30, return exactly one session with that raw targetMinutes value.
 11. If targetMinutes is 60, return either one 60-minute session or two 30-minute sessions only when the task naturally has two distinct phases.
-
-FOCUS LEVEL RULES
-
-Assign requiredFocusLevel based on task difficulty by default.
-- HIGH difficulty -> HIGH
-- MEDIUM difficulty -> MEDIUM
-- LOW difficulty -> LOW
-- UNKNOWN difficulty -> FLEXIBLE
-
-Allowed requiredFocusLevel values:
-- HIGH
-- MEDIUM
-- LOW
-- FLEXIBLE
-
-For multi-session tasks, you may assign different requiredFocusLevel values only when the session role clearly differs.
-Examples:
-- Active problem solving, drafting, or implementation -> HIGH or MEDIUM
-- Review, correction, formatting, memorization, or light organization -> MEDIUM, LOW, or FLEXIBLE
 
 DECOMPOSITION GUIDELINES
 
@@ -104,7 +86,6 @@ SATISFACTION_BASED:
 - The task ends when the user feels sufficiently satisfied.
 - Prefer 30-minute or 60-minute sessions.
 - Avoid overly long sessions.
-- If appropriate, make the last session lower focus for review, cleanup, or final check.
 
 QUANTITY_BASED:
 - The task ends when a fixed amount of work is completed.
@@ -129,7 +110,7 @@ Before returning the JSON, verify internally:
 3. sessionMinutes may be raw minutes and does not have to be a multiple of slotUnitMinutes.
 4. Every sessionMinutes is less than or equal to maxContinuousSchedulableMinutes.
 5. For each task, the sum of sessionMinutes equals targetMinutes exactly.
-6. Every requiredFocusLevel is one of HIGH, MEDIUM, LOW, FLEXIBLE.
+6. No requiredFocusLevel is included.
 7. No start time, end time, date, or schedule position is included.
 8. No session title is included.
 9. No extra text is included outside the JSON.
@@ -149,16 +130,12 @@ TASK_DECOMPOSITION_JSON_SCHEMA = {
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["taskId", "sessionMinutes", "requiredFocusLevel"],
+                    "required": ["taskId", "sessionMinutes"],
                     "properties": {
                         "taskId": {"type": "integer"},
                         "sessionMinutes": {
                             "type": "integer",
                             "minimum": 1,
-                        },
-                        "requiredFocusLevel": {
-                            "type": "string",
-                            "enum": ["HIGH", "MEDIUM", "LOW", "FLEXIBLE"],
                         },
                     },
                 },
@@ -166,6 +143,19 @@ TASK_DECOMPOSITION_JSON_SCHEMA = {
         },
     },
 }
+
+
+class _OpenAITaskSession(BaseModel):
+    """OpenAI가 생성하는 최소 세션 분할 결과."""
+
+    taskId: int
+    sessionMinutes: int
+
+
+class _OpenAITaskDecompositionResponse(BaseModel):
+    """OpenAI 응답은 집중도를 포함하지 않는다."""
+
+    taskSessions: list[_OpenAITaskSession]
 
 
 def build_openai_messages(request: TaskDecompositionRequest) -> list[dict[str, str]]:
@@ -210,6 +200,27 @@ def _log_openai_debug_response(
     )
 
 
+def inject_required_focus_levels(
+    request: TaskDecompositionRequest,
+    response: _OpenAITaskDecompositionResponse,
+) -> TaskDecompositionResponse:
+    """원본 task difficulty 기준으로 세션 requiredFocusLevel을 주입한다."""
+
+    focus_levels = {
+        task.taskId: DIFFICULTY_FOCUS_MAP[task.difficulty] for task in request.tasks
+    }
+    return TaskDecompositionResponse(
+        taskSessions=[
+            TaskSession(
+                taskId=session.taskId,
+                sessionMinutes=session.sessionMinutes,
+                requiredFocusLevel=focus_levels.get(session.taskId, "FLEXIBLE"),
+            )
+            for session in response.taskSessions
+        ]
+    )
+
+
 async def call_openai_decomposition(
     request: TaskDecompositionRequest,
     client: Any | None = None,
@@ -217,7 +228,7 @@ async def call_openai_decomposition(
 ) -> TaskDecompositionResponse:
     """Structured Outputs로 태스크 분할 JSON을 요청한다.
 
-    OpenAI는 세션 길이와 요구 집중도만 만들고, 실제 시간 배치는 별도 스케줄러가 담당한다.
+    OpenAI는 세션 길이만 만들고, 요구 집중도는 원본 task difficulty 기준으로 서버가 주입한다.
     """
 
     if client is None:
@@ -245,7 +256,8 @@ async def call_openai_decomposition(
         raise ValueError("OpenAI 응답이 비어 있습니다.")
 
     _log_openai_debug_response(request, selected_model, raw)
-    return TaskDecompositionResponse.model_validate_json(raw)
+    openai_response = _OpenAITaskDecompositionResponse.model_validate_json(raw)
+    return inject_required_focus_levels(request, openai_response)
 
 
 def validate_request(request: TaskDecompositionRequest) -> None:
@@ -288,6 +300,9 @@ def validate_decomposition_response(
         raise ValueError("taskSessions는 비어 있을 수 없습니다.")
 
     task_targets = {task.taskId: task.targetMinutes for task in request.tasks}
+    task_focus_levels = {
+        task.taskId: DIFFICULTY_FOCUS_MAP[task.difficulty] for task in request.tasks
+    }
     task_ids = set(task_targets)
     sums: dict[int, int] = defaultdict(int)
 
@@ -303,6 +318,12 @@ def validate_decomposition_response(
             )
         if session.requiredFocusLevel not in ALLOWED_FOCUS_LEVELS:
             raise ValueError(f"허용되지 않은 requiredFocusLevel입니다: {session.requiredFocusLevel}")
+        expected_focus_level = task_focus_levels[session.taskId]
+        if session.requiredFocusLevel != expected_focus_level:
+            raise ValueError(
+                "requiredFocusLevel은 원본 task difficulty에서 상속되어야 합니다: "
+                f"taskId={session.taskId}, {session.requiredFocusLevel} != {expected_focus_level}"
+            )
         sums[session.taskId] += session.sessionMinutes
 
     missing_task_ids = task_ids - set(sums)

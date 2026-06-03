@@ -13,7 +13,9 @@ from app.schemas.tasks import (
 )
 from app.services import task_decomposition
 from app.services.task_decomposition import (
+    TASK_DECOMPOSITION_JSON_SCHEMA,
     fallback_decompose,
+    inject_required_focus_levels,
     validate_decomposition_response,
     validate_request,
 )
@@ -174,6 +176,91 @@ def test_validate_response_rejects_wrong_sum():
 
     with pytest.raises(ValueError, match="세션 합계"):
         validate_decomposition_response(req, response)
+
+
+def test_openai_schema_does_not_request_required_focus_level():
+    session_schema = TASK_DECOMPOSITION_JSON_SCHEMA["schema"]["properties"]["taskSessions"][
+        "items"
+    ]
+
+    assert session_schema["required"] == ["taskId", "sessionMinutes"]
+    assert "requiredFocusLevel" not in session_schema["properties"]
+
+
+def test_inject_required_focus_levels_from_task_difficulty():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=1,
+                title="강의 듣기",
+                taskType="TIME_BASED",
+                difficulty="LOW",
+                targetMinutes=30,
+            ),
+            dict(
+                taskId=2,
+                title="알고리즘 문제풀이",
+                taskType="QUANTITY_BASED",
+                difficulty="HIGH",
+                targetMinutes=60,
+            ),
+        ]
+    )
+    openai_response = task_decomposition._OpenAITaskDecompositionResponse(
+        taskSessions=[
+            task_decomposition._OpenAITaskSession(taskId=1, sessionMinutes=30),
+            task_decomposition._OpenAITaskSession(taskId=2, sessionMinutes=60),
+        ]
+    )
+
+    response = inject_required_focus_levels(req, openai_response)
+
+    assert [session.requiredFocusLevel for session in response.taskSessions] == [
+        "LOW",
+        "HIGH",
+    ]
+    validate_decomposition_response(req, response)
+
+
+def test_validate_response_rejects_non_inherited_focus_level():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=101,
+                title="자료구조 5장 문제풀이",
+                taskType="QUANTITY_BASED",
+                difficulty="HIGH",
+                targetMinutes=120,
+            )
+        ]
+    )
+    response = TaskDecompositionResponse(
+        taskSessions=[
+            TaskSession(taskId=101, sessionMinutes=60, requiredFocusLevel="HIGH"),
+            TaskSession(taskId=101, sessionMinutes=60, requiredFocusLevel="LOW"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="상속"):
+        validate_decomposition_response(req, response)
+
+
+def test_fallback_inherits_unknown_difficulty_as_flexible():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=1,
+                title="범위 정리",
+                taskType="SATISFACTION_BASED",
+                difficulty="UNKNOWN",
+                targetMinutes=120,
+            )
+        ]
+    )
+
+    response = fallback_decompose(req)
+
+    assert {session.requiredFocusLevel for session in response.taskSessions} == {"FLEXIBLE"}
 
 
 def test_decompose_tasks_falls_back_after_invalid_openai_response(monkeypatch, caplog):
