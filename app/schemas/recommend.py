@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RecommendCandidateDTO(BaseModel):
@@ -30,20 +29,12 @@ class RecommendCandidateDTO(BaseModel):
 
 
 class RecommendRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
     targetDate: date
     availableStart: time
     availableEnd: time
     tasks: list[RecommendCandidateDTO] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_legacy_candidates(cls, data: Any) -> Any:
-        """초기 API 이름(candidates)을 쓰는 호출부와의 호환성을 유지한다."""
-        if isinstance(data, dict) and "tasks" not in data and "candidates" in data:
-            return {**data, "tasks": data["candidates"]}
-        return data
 
 
 class RecommendedTaskDTO(BaseModel):

@@ -29,7 +29,7 @@ from app.services.initial_estimator.constants import (
     ETA_TYPE,
     TYPE_SHRINKAGE_N,
 )
-from app.services.initial_estimator.estimation import calculate_prediction
+from app.services.initial_estimator.estimation import estimate_initial_duration
 from app.services.updater import update_coefficients
 
 
@@ -162,7 +162,7 @@ def test_predict_all_real_tasks_and_print_table():
 
     for user, tid, _name, type_kr, estimated, difficulty_kr in REAL_TASKS:
         req = _build_request(estimated, type_kr, difficulty_kr)
-        result = calculate_prediction(req)
+        result = estimate_initial_duration(req)
 
         ratio = result.predictedMinutes / estimated
         total_estimated += estimated
@@ -194,7 +194,7 @@ def test_predict_per_user_with_sequential_completed_count():
 
     for user, _tid, _name, type_kr, estimated, difficulty_kr in REAL_TASKS:
         req = _build_request(estimated, type_kr, difficulty_kr, completed=counts[user])
-        result = calculate_prediction(req)
+        result = estimate_initial_duration(req)
         expected_stage = "RULE" if counts[user] == 0 else "RULE_AVERAGE_BLEND"
         assert result.stage == expected_stage
         counts[user] += 1
@@ -259,7 +259,7 @@ def test_simulate_predict_update_cycle_per_user():
         diff_code = DIFFICULTY_MAP[diff_kr]
 
         # 1) 현재 누적 계수로 예측
-        pred = calculate_prediction(
+        pred = estimate_initial_duration(
             PredictRequest(
                 estimatedMinutes=estimated,
                 completedCount=completed,
@@ -366,7 +366,7 @@ def test_correction_direction_by_type_and_difficulty(type_kr, difficulty_kr, exp
     baseline_ratio = 1.30  # 만족형/상이 1.65 수준, 분량형/하가 1.16 수준 — 1.30을 기준선으로
 
     req = _build_request(estimated, type_kr, difficulty_kr)
-    result = calculate_prediction(req)
+    result = estimate_initial_duration(req)
     ratio = result.predictedMinutes / estimated
 
     if expect_ratio_gt_baseline:

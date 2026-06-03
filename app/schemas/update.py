@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UpdateRequest(BaseModel):
     """완료 기록 한 건을 기반으로 사용자별 시간 예측 계수를 갱신하기 위한 입력."""
+
+    model_config = ConfigDict(extra="forbid")
 
     estimatedMinutes: float = Field(..., description="사용자가 입력했던 추정 소요시간(분)")
     actualMinutes: float = Field(..., description="실제 소요된 시간(분)")
@@ -16,12 +18,6 @@ class UpdateRequest(BaseModel):
     taskType: str
 
     difficulty: str
-    priority: Optional[str] = Field(
-        default=None,
-        description="Legacy unused. 초기 소요 시간 예측 계산에는 사용하지 않음",
-    )
-    # TODO: 현재 RIDGE/TREE 단계가 스텁이라 계산에 사용되지 않는다.
-    # Java 호출부 호환성을 확인한 뒤 제거하거나, 사용자 residual 피처로만 유지한다.
     folderId: Optional[str] = None
 
     # 업데이트 전 현재 계수 (없으면 신규 사용자)
@@ -37,10 +33,6 @@ class UpdateRequest(BaseModel):
     systemGlobalPrior: float
     systemTypeEffect: dict[str, float]
     systemDifficultyEffect: dict[str, float]
-    systemPriorityEffect: dict[str, float] = Field(
-        default_factory=dict,
-        description="Legacy unused. 초기 소요 시간 예측 계산에는 사용하지 않음",
-    )
 
 
 class UpdateResponse(BaseModel):

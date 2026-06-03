@@ -21,7 +21,7 @@ from app.services.classifier import (
     classify_task,
 )
 from app.services.common import CalculationError
-from app.services.initial_estimator.estimation import calculate_prediction
+from app.services.initial_estimator.estimation import estimate_initial_duration
 from app.services.scheduler import CandidateTask, RecommendInput, recommend_tasks
 from app.services.task_decomposition import decompose_tasks
 
@@ -73,7 +73,7 @@ def classify(req: ClassifyRequest, request: Request):
 def predict(req: PredictRequest, request: Request):
     """Spring에서 전달한 계수와 count 기반으로 보정 소요시간을 계산한다."""
     try:
-        result = calculate_prediction(req)
+        result = estimate_initial_duration(req)
     except CalculationError as exc:
         return error_response(400, exc.code, exc.message, request.url.path)
     except Exception:

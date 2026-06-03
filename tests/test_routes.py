@@ -54,6 +54,28 @@ def test_validation_error_uses_common_format():
     assert body["error"]["message"]
 
 
+def test_unknown_request_fields_are_rejected():
+    response = client.post(
+        "/tasks/estimate",
+        json={
+            "estimatedMinutes": 60,
+            "completedCount": 0,
+            "taskType": "TIME_BASED",
+            "difficulty": "MEDIUM",
+            "systemGlobalPrior": 0.0,
+            "systemTypeEffect": {},
+            "systemDifficultyEffect": {},
+            "systemPriorityEffect": {},
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 422
+    _assert_common_response(body, "FAIL", "/tasks/estimate")
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "systemPriorityEffect" in body["error"]["message"]
+
+
 def test_method_not_allowed_uses_common_format():
     response = client.get("/tasks/estimate")
     body = response.json()

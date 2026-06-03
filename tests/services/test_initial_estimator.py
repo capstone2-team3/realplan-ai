@@ -29,7 +29,6 @@ from app.services.initial_estimator.constants import (
     EARLY_THRESHOLD,
 )
 from app.services.initial_estimator.average_stage import AverageBaselineStage
-from app.services.initial_estimator.early_stage import EarlyStage
 from app.services.initial_estimator.router import PlanningRouter
 from app.services.initial_estimator.rule_stage import RuleStage
 from app.services.initial_estimator.training_record import build_initial_training_record
@@ -38,8 +37,6 @@ from app.services.initial_estimator.training_record import build_initial_trainin
 SYSTEM_GLOBAL = 0.1
 SYSTEM_TYPE = {"SATISFACTION_BASED": 0.05, "PROBLEM_SOLVING": -0.02}
 SYSTEM_DIFFICULTY = {"LOW": -0.03, "MEDIUM": 0.0, "HIGH": 0.08}
-SYSTEM_PRIORITY = {"HIGH": 0.07, "LOW": -0.04}
-
 
 def _make_predict_request(**overrides):
     base = dict(
@@ -58,7 +55,6 @@ def _make_predict_request(**overrides):
         systemGlobalPrior=SYSTEM_GLOBAL,
         systemTypeEffect=SYSTEM_TYPE,
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
-        systemPriorityEffect=SYSTEM_PRIORITY,
     )
     base.update(overrides)
     return PredictRequest(**base)
@@ -82,7 +78,6 @@ def _make_update_request(**overrides):
         systemGlobalPrior=SYSTEM_GLOBAL,
         systemTypeEffect=SYSTEM_TYPE,
         systemDifficultyEffect=SYSTEM_DIFFICULTY,
-        systemPriorityEffect=SYSTEM_PRIORITY,
     )
     base.update(overrides)
     return UpdateRequest(**base)
@@ -91,9 +86,8 @@ def _make_update_request(**overrides):
 # ---------- predict ----------------------------------------------------
 
 
-def test_early_stage_alias_uses_average_baseline_formula():
-    """EarlyStage legacy alias도 average baseline 공식을 사용한다."""
-    stage = EarlyStage()
+def test_average_stage_uses_average_baseline_formula():
+    stage = AverageBaselineStage()
     req = _make_predict_request(taskType="SATISFACTION_BASED", difficulty="HIGH")
     result = stage.predict(req)
 
@@ -143,64 +137,17 @@ def test_predict_existing_user_applies_residual_with_shrinkage():
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
-def test_rule_stage_ignores_legacy_priority_fields():
-    """priority/systemPriorityEffect가 들어와도 RuleStage 계산에는 영향이 없다."""
-    stage = RuleStage()
-    high_req = _make_predict_request(
-        priority="HIGH",
-        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
-    )
-    low_req = _make_predict_request(
-        priority="LOW",
-        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
-    )
-    high_result = stage.predict(high_req)
-    low_result = stage.predict(low_req)
-
-    expected_log = SYSTEM_GLOBAL + SYSTEM_TYPE["SATISFACTION_BASED"]
-    assert math.isclose(high_result.logCorrection, expected_log, rel_tol=1e-9)
-    assert math.isclose(low_result.logCorrection, expected_log, rel_tol=1e-9)
-    assert math.isclose(
-        high_result.predictedMinutes,
-        low_result.predictedMinutes,
-        rel_tol=1e-9,
-    )
-    assert high_result.stage == STAGE_RULE
-
-
 def test_predict_unknown_keys_fallback_to_zero():
     """systemTypeEffect/Difficulty에 없는 키가 들어와도 0으로 fallback."""
     stage = AverageBaselineStage()
     req = _make_predict_request(
         taskType="UNKNOWN_TYPE",
         difficulty="UNKNOWN",
-        priority="UNKNOWN",
     )
     result = stage.predict(req)
 
     expected_log = SYSTEM_GLOBAL + 0.0 + 0.0
     assert math.isclose(result.logCorrection, expected_log, rel_tol=1e-9)
-
-
-def test_average_stage_ignores_legacy_priority_fields():
-    """priority만 바꿔도 AverageBaselineStage 예측값은 동일해야 한다."""
-    stage = AverageBaselineStage()
-    base = dict(
-        completedCount=30,
-        userGlobal=0.2,
-        userTypeResidual={"SATISFACTION_BASED": 0.3},
-        typeCount={"SATISFACTION_BASED": 10},
-        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
-    )
-    high_result = stage.predict(_make_predict_request(priority="HIGH", **base))
-    low_result = stage.predict(_make_predict_request(priority="LOW", **base))
-
-    assert math.isclose(high_result.logCorrection, low_result.logCorrection, rel_tol=1e-9)
-    assert math.isclose(
-        high_result.predictedMinutes,
-        low_result.predictedMinutes,
-        rel_tol=1e-9,
-    )
 
 
 def test_average_stage_ignores_folder_residual_when_folder_is_missing():
@@ -289,34 +236,6 @@ def test_update_returns_new_global_and_residual():
     assert result.stage == STAGE_AVERAGE_BASELINE
 
 
-def test_update_residual_target_ignores_legacy_priority_fields():
-    stage = AverageBaselineStage()
-    base = dict(
-        estimatedMinutes=60.0,
-        actualMinutes=90.0,
-        taskType="SATISFACTION_BASED",
-        difficulty="MEDIUM",
-        userGlobal=0.0,
-        userTypeResidual={"SATISFACTION_BASED": 0.0},
-        userDifficultyResidual={"MEDIUM": 0.0},
-        systemPriorityEffect={"HIGH": 99.0, "LOW": -99.0},
-    )
-
-    high_result = stage.update(_make_update_request(priority="HIGH", **base))
-    low_result = stage.update(_make_update_request(priority="LOW", **base))
-
-    assert math.isclose(
-        high_result.userTypeResidual["SATISFACTION_BASED"],
-        low_result.userTypeResidual["SATISFACTION_BASED"],
-        rel_tol=1e-9,
-    )
-    assert math.isclose(
-        high_result.userDifficultyResidual["MEDIUM"],
-        low_result.userDifficultyResidual["MEDIUM"],
-        rel_tol=1e-9,
-    )
-
-
 def test_update_without_folder_id_preserves_folder_maps():
     stage = AverageBaselineStage()
     req = _make_update_request(
@@ -332,7 +251,7 @@ def test_update_without_folder_id_preserves_folder_maps():
 
 def test_update_clamps_upper_bound():
     """actualMinutes / estimatedMinutes = 5.0 → clampedLogRatio == log(4.0)."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(estimatedMinutes=10.0, actualMinutes=50.0)
     result = stage.update(req)
 
@@ -342,7 +261,7 @@ def test_update_clamps_upper_bound():
 
 def test_update_clamps_lower_bound():
     """actualMinutes / estimatedMinutes = 1/5 → clampedLogRatio == log(1/3)."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(estimatedMinutes=50.0, actualMinutes=10.0)
     result = stage.update(req)
 
@@ -352,7 +271,7 @@ def test_update_clamps_lower_bound():
 
 def test_update_new_user_uses_system_prior_as_userglobal_old():
     """userGlobal=None일 때 EMA의 이전값으로 systemGlobalPrior가 사용된다."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=60.0,
         actualMinutes=60.0,  # log_ratio = 0
@@ -365,7 +284,7 @@ def test_update_new_user_uses_system_prior_as_userglobal_old():
 
 
 def test_update_invalid_minutes_raise():
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     with pytest.raises(Exception):
         stage.update(_make_update_request(estimatedMinutes=0))
     with pytest.raises(Exception):
@@ -377,7 +296,7 @@ def test_update_invalid_minutes_raise():
 
 def test_update_upper_boundary_is_not_dropped():
     """ratio == DROP_RATIO_MAX (8.0)는 경계값이므로 Drop되지 않고 학습된다."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=100.0,
         actualMinutes=800.0,
@@ -396,7 +315,7 @@ def test_update_upper_boundary_is_not_dropped():
 
 def test_update_above_upper_drop_threshold_is_dropped():
     """ratio > DROP_RATIO_MAX (예: 8.01) → Drop, 계수 변경 없음."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=100.0,
         actualMinutes=801.0,
@@ -423,7 +342,7 @@ def test_update_above_upper_drop_threshold_is_dropped():
 
 def test_update_lower_boundary_is_not_dropped():
     """ratio == DROP_RATIO_MIN (0.1)는 경계값이므로 Drop되지 않는다."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=100.0,
         actualMinutes=10.0,
@@ -440,7 +359,7 @@ def test_update_lower_boundary_is_not_dropped():
 
 def test_update_below_lower_drop_threshold_is_dropped():
     """ratio < DROP_RATIO_MIN (예: 0.09) → Drop, 계수 변경 없음."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=100.0,
         actualMinutes=9.0,
@@ -462,7 +381,7 @@ def test_update_below_lower_drop_threshold_is_dropped():
 
 def test_drop_new_user_uses_system_prior_for_user_global():
     """Drop 시 userGlobal=None이면 systemGlobalPrior로 fallback해서 반환한다."""
-    stage = EarlyStage()
+    stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=100.0,
         actualMinutes=900.0,  # ratio=9.0 → Drop
@@ -489,12 +408,6 @@ def test_drop_constants_are_aligned_with_clamp():
 
 
 # ---------- router & soft blending -------------------------------------
-
-
-def test_early_stage_wrapper_uses_average_stage_label():
-    stage = EarlyStage()
-    result = stage.predict(_make_predict_request(completedCount=EARLY_THRESHOLD))
-    assert result.stage == STAGE_AVERAGE_BASELINE
 
 
 def test_router_completed_zero_returns_rule():
