@@ -11,10 +11,10 @@ from app.services.common import CalculationError
 
 # 집중도 보정 가중치. 보통 집중(1.0) 기준 생산성 비율.
 FOCUS_WEIGHT_MAP: dict[FocusLevel, float] = {
-    FocusLevel.DISTRACTED: 0.8,
-    FocusLevel.NORMAL:     1.0,
-    FocusLevel.FOCUSED:    1.2,
-    FocusLevel.FLOW:       1.5,
+    FocusLevel.LOW:       0.8,
+    FocusLevel.MEDIUM:    1.0,
+    FocusLevel.HIGH:      1.2,
+    FocusLevel.VERY_HIGH: 1.5,
 }
 
 # EMA 기본 가중치. blendingWeight = BLENDING_WEIGHT_BASE × progress 로 사용해

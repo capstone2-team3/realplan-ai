@@ -20,20 +20,20 @@ def _make_request(**overrides) -> SessionRemainingRequest:
     base = dict(
         elapsedMinutes=70.0,
         progress=0.5,
-        focusLevel=FocusLevel.NORMAL,
+        focusLevel=FocusLevel.MEDIUM,
         previousAiTotalMinutes=200.0,
     )
     base.update(overrides)
     return SessionRemainingRequest(**base)
 
 
-# ---------- 기본 동작 (NORMAL 집중도) ---------------------------------
+# ---------- 기본 동작 (MEDIUM 집중도) ---------------------------------
 
 
-def test_normal_focus_baseline():
-    """NORMAL: focusAdjusted == progressBased, 전체 흐름 수치 검증.
+def test_medium_focus_baseline():
+    """MEDIUM: focusAdjusted == progressBased, 전체 흐름 수치 검증.
 
-    elapsed=70, progress=0.5, NORMAL(1.0), prev=200
+    elapsed=70, progress=0.5, MEDIUM(1.0), prev=200
       progressBased       = 70 × (1/0.5 - 1)            = 70
       focusAdjusted       = 70 × 1.0                    = 70
       normal_focus_total= 70 + 70                     = 140
@@ -56,10 +56,10 @@ def test_normal_focus_baseline():
 # ---------- 집중도 정규화 방향 -----------------------------------------
 
 
-def test_distracted_normalizes_to_shorter():
-    """DISTRACTED(0.8): focusAdjusted = progressBased × 0.8 (보통 기준으로 환산하면 짧아짐)."""
+def test_low_focus_normalizes_to_shorter():
+    """LOW(0.8): focusAdjusted = progressBased × 0.8 (보통 기준으로 환산하면 짧아짐)."""
     result = estimate_remaining(
-        _make_request(progress=0.9, focusLevel=FocusLevel.DISTRACTED, previousAiTotalMinutes=100.0)
+        _make_request(progress=0.9, focusLevel=FocusLevel.LOW, previousAiTotalMinutes=100.0)
     )
     expected_progress_based = 70.0 * (1 / 0.9 - 1)
     expected_focus_adjusted = expected_progress_based * 0.8
@@ -70,10 +70,10 @@ def test_distracted_normalizes_to_shorter():
     assert result.normalizedRemainingMinutes < result.progressBasedRemainingMinutes
 
 
-def test_flow_normalizes_to_longer():
-    """FLOW(1.5): focusAdjusted = progressBased × 1.5 (보통 기준으로 환산하면 길어짐)."""
+def test_very_high_focus_normalizes_to_longer():
+    """VERY_HIGH(1.5): focusAdjusted = progressBased × 1.5 (보통 기준으로 환산하면 길어짐)."""
     result = estimate_remaining(
-        _make_request(progress=0.9, focusLevel=FocusLevel.FLOW, previousAiTotalMinutes=100.0)
+        _make_request(progress=0.9, focusLevel=FocusLevel.VERY_HIGH, previousAiTotalMinutes=100.0)
     )
     expected_progress_based = 70.0 * (1 / 0.9 - 1)
     expected_focus_adjusted = expected_progress_based * 1.5
@@ -84,10 +84,10 @@ def test_flow_normalizes_to_longer():
 
 
 def test_focus_weight_map_matches_spec():
-    assert FOCUS_WEIGHT_MAP[FocusLevel.DISTRACTED] == 0.8
-    assert FOCUS_WEIGHT_MAP[FocusLevel.NORMAL] == 1.0
-    assert FOCUS_WEIGHT_MAP[FocusLevel.FOCUSED] == 1.2
-    assert FOCUS_WEIGHT_MAP[FocusLevel.FLOW] == 1.5
+    assert FOCUS_WEIGHT_MAP[FocusLevel.LOW] == 0.8
+    assert FOCUS_WEIGHT_MAP[FocusLevel.MEDIUM] == 1.0
+    assert FOCUS_WEIGHT_MAP[FocusLevel.HIGH] == 1.2
+    assert FOCUS_WEIGHT_MAP[FocusLevel.VERY_HIGH] == 1.5
 
 
 # ---------- blendingWeight progress 비례 -------------------------------
@@ -111,7 +111,7 @@ def test_blending_weight_high_progress():
 
 def test_incomplete_overrun_gets_30min_fallback():
     """progress < 1.0인데 예측이 음수로 떨어지면 스케줄링용 30분 fallback."""
-    # elapsed=200, progress=0.5, NORMAL, prev=120
+    # elapsed=200, progress=0.5, MEDIUM, prev=120
     #   progressBased=200, focusAdjusted=200
     #   normal_focus_total=400, blendingWeight=0.2
     #   ai_total_pre = 0.2×400 + 0.8×120 = 176
@@ -125,7 +125,7 @@ def test_incomplete_overrun_gets_30min_fallback():
 
 def test_completed_overrun_clamps_to_zero():
     """progress = 1.0 (완료)이면 30분 fallback 없이 0으로 clamp."""
-    # elapsed=200, progress=1.0, NORMAL, prev=120
+    # elapsed=200, progress=1.0, MEDIUM, prev=120
     #   progressBased = 200 × (1/1.0 - 1) = 0
     #   focusAdjusted = 0, normal_focus_total = 200
     #   blendingWeight = 0.4
@@ -144,12 +144,12 @@ def test_completed_overrun_clamps_to_zero():
 @pytest.mark.parametrize(
     "elapsed,progress,focus,prev",
     [
-        (70.0, 0.5, FocusLevel.NORMAL, 200.0),
-        (70.0, 0.9, FocusLevel.DISTRACTED, 100.0),
-        (70.0, 0.9, FocusLevel.FLOW, 100.0),
-        (10.0, 0.1, FocusLevel.FOCUSED, 50.0),
-        (200.0, 0.5, FocusLevel.NORMAL, 120.0),   # 30분 fallback
-        (200.0, 1.0, FocusLevel.NORMAL, 120.0),   # 완료 + 0 clamp
+        (70.0, 0.5, FocusLevel.MEDIUM, 200.0),
+        (70.0, 0.9, FocusLevel.LOW, 100.0),
+        (70.0, 0.9, FocusLevel.VERY_HIGH, 100.0),
+        (10.0, 0.1, FocusLevel.HIGH, 50.0),
+        (200.0, 0.5, FocusLevel.MEDIUM, 120.0),   # 30분 fallback
+        (200.0, 1.0, FocusLevel.MEDIUM, 120.0),   # 완료 + 0 clamp
     ],
 )
 def test_updated_total_invariant(elapsed, progress, focus, prev):

@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 
 
 class FocusLevel(str, Enum):
-    DISTRACTED = "DISTRACTED"
-    NORMAL = "NORMAL"
-    FOCUSED = "FOCUSED"
-    FLOW = "FLOW"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    VERY_HIGH = "VERY_HIGH"
 
 
 class SessionRemainingRequest(BaseModel):
