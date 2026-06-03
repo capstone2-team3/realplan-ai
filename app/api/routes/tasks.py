@@ -99,12 +99,12 @@ def recommend(req: RecommendRequest, request: Request):
         tasks=[
             CandidateTask(
                 taskId=task.taskId,
-                title=task.title,
+                name=task.name,
                 dueDate=task.dueDate,
-                priority=task.priority,
+                importance=task.importance,
                 status=task.status,
-                remainingMinutes=task.remainingMinutes,
-                activeScheduledMinutes=task.activeScheduledMinutes,
+                remainingMin=task.remainingMin,
+                activeScheduledMin=task.activeScheduledMin,
             )
             for task in req.tasks
         ],
@@ -124,15 +124,15 @@ def recommend(req: RecommendRequest, request: Request):
                 RecommendedTaskDTO(
                     rank=item.rank,
                     taskId=item.taskId,
-                    title=item.title,
-                    remainingMinutes=item.remainingMinutes,
+                    name=item.name,
+                    remainingMin=item.remainingMin,
                     recommendedMinutes=item.recommendedMinutes,
                     recommendScore=item.recommendScore,
                     deadlineScore=item.deadlineScore,
-                    priorityScore=item.priorityScore,
+                    importanceScore=item.importanceScore,
                     isDueToday=item.isDueToday,
                     deadlineLabel=item.deadlineLabel,
-                    priorityLabel=item.priorityLabel,
+                    importanceLabel=item.importanceLabel,
                     tags=item.tags,
                     reason=item.reason,
                 )

@@ -20,12 +20,12 @@ class CandidateTask:
     """
 
     taskId: int
-    title: str
+    name: str
     status: TaskStatus
-    remainingMinutes: int
+    remainingMin: int
     dueDate: date | datetime | None = None
-    priority: str | None = None
-    activeScheduledMinutes: int | None = None
+    importance: str | None = None
+    activeScheduledMin: int | None = None
 
 
 @dataclass(frozen=True)
@@ -39,15 +39,15 @@ class RecommendInput:
 class RecommendedTask:
     rank: int
     taskId: int
-    title: str
-    remainingMinutes: int
+    name: str
+    remainingMin: int
     recommendedMinutes: int
     recommendScore: float
     deadlineScore: int
-    priorityScore: int
+    importanceScore: int
     isDueToday: bool
     deadlineLabel: str
-    priorityLabel: str
+    importanceLabel: str
     tags: list[str]
     reason: str
 
@@ -70,10 +70,10 @@ class _ScoredTask:
     remaining_minutes: int
     recommend_score: float
     deadline_score: int
-    priority_score: int
+    importance_score: int
     is_due_today: bool
     deadline_label: str
-    priority_label: str
+    importance_label: str
 
 
 def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
@@ -132,8 +132,8 @@ def calculate_remaining_minutes(task: CandidateTask) -> int | None:
     """백엔드 remainingMin에서 이미 유효하게 배치된 시간을 빼 추천 가능한 남은 시간을 구한다."""
 
     return (
-        task.remainingMinutes
-        - _none_to_zero(task.activeScheduledMinutes)
+        task.remainingMin
+        - _none_to_zero(task.activeScheduledMin)
     )
 
 
@@ -160,14 +160,14 @@ def deadline_score(due_date: date | datetime | None, target_date: date) -> int:
     return 10
 
 
-def priority_score(priority: str | None) -> int:
-    """백엔드 우선순위 문자열을 추천 계산용 점수로 변환한다."""
+def importance_score(importance: str | None) -> int:
+    """백엔드 중요도 문자열을 추천 계산용 점수로 변환한다."""
 
     return {
         "HIGH": 100,
         "MEDIUM": 60,
         "LOW": 30,
-    }.get((priority or "").upper(), 40)
+    }.get((importance or "").upper(), 40)
 
 
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
@@ -183,10 +183,10 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
     due_day = _to_date(task.dueDate)
     is_due_today = due_day is not None and due_day <= target_date
     task_deadline_score = deadline_score(due_day, target_date)
-    task_priority_score = priority_score(task.priority)
+    task_importance_score = importance_score(task.importance)
     # 추천 점수는 마감 압박을 더 크게 보고, 중요도는 보조 기준으로 반영한다.
     recommend_score = round(
-        0.6 * task_deadline_score + 0.4 * task_priority_score,
+        0.6 * task_deadline_score + 0.4 * task_importance_score,
         1,
     )
 
@@ -196,10 +196,10 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         remaining_minutes=remaining_minutes,
         recommend_score=recommend_score,
         deadline_score=task_deadline_score,
-        priority_score=task_priority_score,
+        importance_score=task_importance_score,
         is_due_today=is_due_today,
         deadline_label=_deadline_label(due_day, target_date),
-        priority_label=_priority_label(task.priority),
+        importance_label=_importance_label(task.importance),
     )
 
 
@@ -215,7 +215,7 @@ def _candidate_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, 
     return (
         -candidate.recommend_score,
         candidate.due_date or date.max,
-        -candidate.priority_score,
+        -candidate.importance_score,
         candidate.remaining_minutes,
         candidate.task.taskId,
     )
@@ -228,7 +228,7 @@ def _selected_sort_key(candidate: _ScoredTask) -> tuple[float, bool, date, int, 
         -candidate.recommend_score,
         not candidate.is_due_today,
         candidate.due_date or date.max,
-        -candidate.priority_score,
+        -candidate.importance_score,
         candidate.remaining_minutes,
         candidate.task.taskId,
     )
@@ -243,15 +243,15 @@ def _to_recommended_task(
     return RecommendedTask(
         rank=rank,
         taskId=candidate.task.taskId,
-        title=candidate.task.title,
-        remainingMinutes=candidate.remaining_minutes,
+        name=candidate.task.name,
+        remainingMin=candidate.remaining_minutes,
         recommendedMinutes=recommended_minutes,
         recommendScore=candidate.recommend_score,
         deadlineScore=candidate.deadline_score,
-        priorityScore=candidate.priority_score,
+        importanceScore=candidate.importance_score,
         isDueToday=candidate.is_due_today,
         deadlineLabel=candidate.deadline_label,
-        priorityLabel=candidate.priority_label,
+        importanceLabel=candidate.importance_label,
         tags=tags,
         reason=_reason(candidate, recommended_minutes),
     )
@@ -265,7 +265,7 @@ def _tags(candidate: _ScoredTask, recommended_minutes: int) -> list[str]:
     elif candidate.due_date is not None and candidate.deadline_score >= 70:
         tags.append("마감 임박")
 
-    if candidate.priority_score >= 100:
+    if candidate.importance_score >= 100:
         tags.append("중요도 높음")
     if recommended_minutes < candidate.remaining_minutes:
         tags.append("일부 진행 추천")
@@ -275,11 +275,11 @@ def _tags(candidate: _ScoredTask, recommended_minutes: int) -> list[str]:
 def _reason(candidate: _ScoredTask, recommended_minutes: int) -> str:
     if recommended_minutes < candidate.remaining_minutes:
         return "남은 시간이 길어 오늘은 일부 진행으로 추천했어요."
-    if candidate.is_due_today and candidate.priority_score >= 100:
+    if candidate.is_due_today and candidate.importance_score >= 100:
         return "오늘 마감이고 중요도가 높아 추천했어요."
     if candidate.deadline_score >= 70:
         return "마감이 가까워 우선 추천했어요."
-    if candidate.priority_score >= 100:
+    if candidate.importance_score >= 100:
         return "중요도가 높고 아직 남은 시간이 있어 추천했어요."
     return "오늘 가능한 시간 안에서 진행하기 좋아 추천했어요."
 
@@ -294,12 +294,12 @@ def _deadline_label(due_date: date | None, target_date: date) -> str:
     return f"D-{days_until_deadline}"
 
 
-def _priority_label(priority: str | None) -> str:
+def _importance_label(importance: str | None) -> str:
     return {
         "HIGH": "중요도 높음",
         "MEDIUM": "중요도 보통",
         "LOW": "중요도 낮음",
-    }.get((priority or "").upper(), "중요도 미정")
+    }.get((importance or "").upper(), "중요도 미정")
 
 
 def _to_date(value: date | datetime | None) -> date | None:

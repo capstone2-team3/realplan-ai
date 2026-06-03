@@ -19,12 +19,12 @@ class RecommendCandidateDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     taskId: int
-    title: str
+    name: str
     dueDate: date | datetime | None = None
-    priority: str | None = None
+    importance: str | None = None
     status: TaskStatus
-    remainingMinutes: int = Field(..., gt=0)
-    activeScheduledMinutes: int | None = Field(default=0, ge=0)
+    remainingMin: int = Field(..., gt=0)
+    activeScheduledMin: int | None = Field(default=0, ge=0)
 
 
 class RecommendRequest(BaseModel):
@@ -38,15 +38,15 @@ class RecommendRequest(BaseModel):
 class RecommendedTaskDTO(BaseModel):
     rank: int
     taskId: int
-    title: str
-    remainingMinutes: int
+    name: str
+    remainingMin: int
     recommendedMinutes: int
     recommendScore: float
     deadlineScore: int
-    priorityScore: int
+    importanceScore: int
     isDueToday: bool
     deadlineLabel: str
-    priorityLabel: str
+    importanceLabel: str
     tags: list[str]
     reason: str
 
