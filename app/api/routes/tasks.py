@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import time
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
 
-from app.api.response import ApiResponse
+from app.api.response import ApiResponse, error_response
 from app.schemas.classify import ClassifyRequest, ClassifyResponse
 from app.schemas.predict import PredictRequest, PredictResponse
 from app.schemas.recommend import (
@@ -76,11 +75,14 @@ def predict(req: PredictRequest, request: Request):
     try:
         result = calculate_prediction(req)
     except CalculationError as exc:
-        body = ApiResponse.fail(exc.code, exc.message, request.url.path)
-        return JSONResponse(status_code=400, content=body.model_dump())
+        return error_response(400, exc.code, exc.message, request.url.path)
     except Exception:
-        body = ApiResponse.fail("PREDICTION_FAILED", "예측 계산 중 오류가 발생했습니다.", request.url.path)
-        return JSONResponse(status_code=500, content=body.model_dump())
+        return error_response(
+            500,
+            "PREDICTION_FAILED",
+            "예측 계산 중 오류가 발생했습니다.",
+            request.url.path,
+        )
 
     return ApiResponse.ok(data=result, path=request.url.path)
 

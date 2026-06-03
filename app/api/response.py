@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Generic, Optional, TypeVar
 
 from pydantic import BaseModel
+from starlette.responses import JSONResponse
 
 T = TypeVar("T")
 
@@ -26,9 +27,13 @@ def status_to_code(status: int) -> str:
         401: "UNAUTHORIZED",
         403: "FORBIDDEN",
         404: "NOT_FOUND",
+        405: "METHOD_NOT_ALLOWED",
+        409: "CONFLICT",
         422: "VALIDATION_ERROR",
+        429: "TOO_MANY_REQUESTS",
         500: "INTERNAL_ERROR",
         502: "BAD_GATEWAY",
+        503: "SERVICE_UNAVAILABLE",
     }.get(status, f"HTTP_{status}")
 
 
@@ -69,3 +74,14 @@ class ApiResponse(BaseModel, Generic[T]):
             error=ApiError(code=code, message=message),
             meta=ApiMeta(timestamp=now_iso(), path=path),
         )
+
+
+def error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    path: str,
+) -> JSONResponse:
+    """공통 실패 응답을 JSONResponse로 변환한다."""
+    body = ApiResponse.fail(code=code, message=message, path=path)
+    return JSONResponse(status_code=status_code, content=body.model_dump())

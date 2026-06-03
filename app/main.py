@@ -26,7 +26,7 @@ register_exception_handlers(app)
 app.include_router(api_router)
 
 
-@app.get("/health")
+@app.get("/health", response_model=ApiResponse[dict[str, str]])
 def health(request: Request):
     """헬스 체크. Spring에서 서비스 살아있는지 확인용."""
     return ApiResponse.ok(

@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.response import ApiResponse, status_to_code
+from app.api.response import error_response, status_to_code
 
 
 def register_exception_handlers(app: FastAPI) -> None:
     async def _http_exception_response(request: Request, exc: StarletteHTTPException):
-        body = ApiResponse.fail(
+        return error_response(
+            status_code=exc.status_code,
             code=status_to_code(exc.status_code),
             message=str(exc.detail),
             path=request.url.path,
         )
-        return JSONResponse(status_code=exc.status_code, content=body.model_dump())
 
     # 코드에서 직접 발생시키는 HTTP 예외
     @app.exception_handler(HTTPException)
@@ -38,19 +37,19 @@ def register_exception_handlers(app: FastAPI) -> None:
         first_error = exc.errors()[0] if exc.errors() else {}
         location = " → ".join(str(loc) for loc in first_error.get("loc", []))
         message = f"[{location}] {first_error.get('msg', '입력값 오류')}"
-        body = ApiResponse.fail(
+        return error_response(
+            status_code=422,
             code="VALIDATION_ERROR",
             message=message,
             path=request.url.path,
         )
-        return JSONResponse(status_code=422, content=body.model_dump())
 
     # 예상하지 못한 예외도 공통 응답 형식으로 변환
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, _exc: Exception):
-        body = ApiResponse.fail(
+        return error_response(
+            status_code=500,
             code="INTERNAL_ERROR",
             message="서버 내부 오류가 발생했습니다.",
             path=request.url.path,
         )
-        return JSONResponse(status_code=500, content=body.model_dump())

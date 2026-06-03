@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
-from app.api.response import ApiResponse
+from app.api.response import ApiResponse, error_response
 from app.schemas.session import SessionRemainingRequest, SessionRemainingResponse
 from app.services.common import CalculationError
 from app.services.session_estimator import estimate_remaining
@@ -24,14 +23,13 @@ def estimate_session_remaining(req: SessionRemainingRequest, request: Request):
     try:
         result = estimate_remaining(req)
     except CalculationError as exc:
-        body = ApiResponse.fail(exc.code, exc.message, request.url.path)
-        return JSONResponse(status_code=400, content=body.model_dump())
+        return error_response(400, exc.code, exc.message, request.url.path)
     except Exception:
-        body = ApiResponse.fail(
+        return error_response(
+            500,
             "SESSION_ESTIMATION_FAILED",
             "세션 잔여시간 계산 중 오류가 발생했습니다.",
             request.url.path,
         )
-        return JSONResponse(status_code=500, content=body.model_dump())
 
     return ApiResponse.ok(data=result, path=request.url.path)
