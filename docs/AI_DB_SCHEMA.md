@@ -11,7 +11,8 @@
 | 구분 | 테이블 | 역할 |
 |---|---|---|
 | 기존 테이블 확장 | `task` | AI 예측 시간이 마지막으로 갱신된 시각 저장 |
-| 신규 테이블 | `daily_plan_session` | `/tasks/decompose` 분할 결과와 자동완성 세션 계획 저장 |
+| 신규 테이블 | `daily_plan_session` | `/tasks/decompose` 분할 결과와 자동완성 논리 세션 저장 |
+| 신규 테이블 | `daily_plan_session_block` | `/schedules/auto-place`가 실제 시간표에 배치한 세션 조각 저장 |
 | 기존 테이블 확장 | `focus_session` | 세션 시작 시점의 계획 시간, AI 잔여시간, 분할 세션 출처 저장 |
 | 기존 테이블 확장 | `session_feedback` | 세션 종료 후 잔여시간 재계산 결과 저장 |
 | 사용자 계수 | `user_ai_profile` | 사용자 단위 global 계획오류율 로그 계수 저장 |
@@ -68,7 +69,8 @@
 | `session_minutes` | `INTEGER` | `taskSessions[].sessionMinutes` | 분할 세션의 raw 시간. 자동배치 전에는 30분 단위가 아닐 수 있음 |
 | `required_focus_level` | `VARCHAR(10)` | `taskSessions[].requiredFocusLevel` | 자동배치 집중도 매칭에 쓰는 요구 집중도. `HIGH`, `MEDIUM`, `LOW`, `FLEXIBLE` |
 | `source_type` | `VARCHAR(10)` | 없음 | 생성 출처. 기본값 `AI`, 허용값 `AI`, `USER`, `BOTH` |
-| `status` | `VARCHAR(15)` | 없음 | 세션 계획 상태. 기본값 `PLANNED`, 허용값 `PLANNED`, `IN_PROGRESS`, `DONE`, `SKIPPED` |
+| `status` | `VARCHAR(15)` | 없음 | 세션 계획 상태. 기본값 `PLANNED`, 허용값 `PLANNED`, `SCHEDULED`, `PARTIAL`, `UNSCHEDULED`, `IN_PROGRESS`, `DONE`, `SKIPPED` |
+| `unscheduled_reason` | `VARCHAR(50)` | `unscheduledSessions[].reasonCode` | 미배치 또는 부분 배치 사유. 배치 성공 시 `NULL` |
 | `created_at` | `TIMESTAMP(6)` | 없음 | 생성 시각 |
 | `updated_at` | `TIMESTAMP(6)` | 없음 | 수정 시각 |
 
@@ -84,7 +86,30 @@
 
 - 백엔드가 `/tasks/decompose` 응답을 받은 뒤, 사용자가 “시간표 자동 완성” 결과를 저장하거나 확정할 때 생성합니다.
 - 같은 원본 태스크가 여러 세션으로 분할되면 같은 `daily_plan_task_id` 아래에 `session_order`만 다르게 여러 행을 저장합니다.
-- 자동배치에서 30분 단위로 올림된 시간이 실제 계획 시간으로 확정된다면, `session_minutes`에는 Python 분할 결과의 raw 시간을 저장하고 배치 결과 시간은 별도 배치/슬롯 표현에 저장하는 것을 권장합니다.
+- 자동배치에서 30분 단위로 올림된 실제 배치 결과는 `daily_plan_session_block`에 저장합니다.
+
+### `daily_plan_session_block`
+
+`/schedules/auto-place`가 논리 세션을 실제 시간표에 꽂은 결과입니다.
+하나의 `daily_plan_session`이 연속 배치되지 못하면 30분 atomic chunk 여러 개로 나뉠 수 있으므로,
+실제 배치 조각은 별도 하위 테이블로 저장합니다.
+
+| 컬럼 | 타입 | API 필드 | 설명 |
+|---|---|---|---|
+| `session_block_id` | `BIGSERIAL` | 없음 | PK |
+| `daily_plan_session_id` | `BIGINT` | `scheduleBlocks[].dailyPlanSessionId` | 소속 논리 세션 FK. `daily_plan_session.daily_plan_session_id` 참조 |
+| `block_order` | `INTEGER` | 응답 배열 순서 | 같은 논리 세션 안에서의 실제 배치 조각 순서 |
+| `start_time` | `VARCHAR(5)` | `scheduleBlocks[].start` | 배치 시작 시각. `27:00` 표현을 허용하기 위해 문자열로 저장 |
+| `end_time` | `VARCHAR(5)` | `scheduleBlocks[].end` | 배치 종료 시각 |
+| `duration_minutes` | `INTEGER` | `scheduleBlocks[].durationMinutes` | 배치 조각 길이. 보통 30분 단위 |
+| `created_at` | `TIMESTAMP(6)` | 없음 | 생성 시각 |
+| `updated_at` | `TIMESTAMP(6)` | 없음 | 수정 시각 |
+
+#### 저장 타이밍
+
+- 백엔드가 `/schedules/auto-place` 응답을 받은 뒤 `scheduleBlocks`를 `daily_plan_session_block`에 저장합니다.
+- 같은 `dailyPlanSessionId`에 여러 `scheduleBlocks`가 오면 같은 `daily_plan_session_id` 아래에 `block_order`만 다르게 여러 행으로 저장합니다.
+- `unscheduledSessions`에 포함된 세션은 `daily_plan_session.status`를 `UNSCHEDULED` 또는 `PARTIAL`로 갱신하고 `unscheduled_reason`을 저장합니다.
 
 ### `session_feedback`
 

@@ -38,6 +38,7 @@ class PlacementTask(BaseModel):
 class PlacementTaskSession(BaseModel):
     """태스크 분할 결과 한 조각. 실제 시간표 위치는 아직 정해지지 않은 상태다."""
 
+    dailyPlanSessionId: int | None = None
     taskId: int
     sessionMinutes: int
     requiredFocusLevel: RequiredFocusLevel
@@ -55,6 +56,7 @@ class AutoPlacementRequest(BaseModel):
 
 
 class ScheduleBlock(BaseModel):
+    dailyPlanSessionId: int | None = None
     taskId: int
     start: str
     end: str
@@ -75,6 +77,7 @@ class ScheduleBlock(BaseModel):
 
 
 class UnscheduledSession(BaseModel):
+    dailyPlanSessionId: int | None = None
     taskId: int
     unscheduledMinutes: int
     reasonCode: UnscheduledReasonCode

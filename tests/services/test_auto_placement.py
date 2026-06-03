@@ -11,6 +11,7 @@ from app.schemas.schedules import (
     PlacementTaskSession,
     ScheduleBlock,
     TimeBlock,
+    UnscheduledSession,
 )
 from app.services.auto_placement import (
     auto_place_sessions,
@@ -45,8 +46,10 @@ def _session(
     session_minutes: int,
     *,
     required_focus_level: str = "MEDIUM",
+    daily_plan_session_id: int | None = None,
 ) -> dict:
     return dict(
+        dailyPlanSessionId=daily_plan_session_id,
         taskId=task_id,
         sessionMinutes=session_minutes,
         requiredFocusLevel=required_focus_level,
@@ -121,6 +124,82 @@ def test_session_falls_back_to_atomic_chunks_when_continuous_position_is_missing
         ScheduleBlock(taskId=1, start="18:00", end="18:30"),
     ]
     assert response.unscheduledSessions == []
+
+
+def test_schedule_blocks_preserve_daily_plan_session_id():
+    req = _request(
+        taskSessions=[_session(1, 60, daily_plan_session_id=10)],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(
+            dailyPlanSessionId=10,
+            taskId=1,
+            start="09:00",
+            end="10:00",
+        )
+    ]
+
+
+def test_adjacent_blocks_from_different_sessions_are_not_merged():
+    req = _request(
+        tasks=[_task(1, 60, is_due_today=True)],
+        taskSessions=[
+            _session(1, 30, daily_plan_session_id=10),
+            _session(1, 30, daily_plan_session_id=11),
+        ],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(
+            dailyPlanSessionId=10,
+            taskId=1,
+            start="09:00",
+            end="09:30",
+        ),
+        ScheduleBlock(
+            dailyPlanSessionId=11,
+            taskId=1,
+            start="09:30",
+            end="10:00",
+        ),
+    ]
+
+
+def test_unscheduled_session_preserves_daily_plan_session_id():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(start="09:00", end="09:30"),
+        ],
+        focusTimeSlots=[
+            dict(start="09:00", end="09:30", focusScore=80),
+        ],
+        tasks=[_task(1, 60, is_due_today=True)],
+        taskSessions=[_session(1, 60, daily_plan_session_id=10)],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.scheduleBlocks == [
+        ScheduleBlock(
+            dailyPlanSessionId=10,
+            taskId=1,
+            start="09:00",
+            end="09:30",
+        )
+    ]
+    assert response.unscheduledSessions == [
+        UnscheduledSession(
+            dailyPlanSessionId=10,
+            taskId=1,
+            unscheduledMinutes=30,
+            reasonCode="INSUFFICIENT_TIME",
+        )
+    ]
 
 
 def test_due_today_task_is_placed_before_regular_task():

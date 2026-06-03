@@ -378,6 +378,7 @@ def place_session_continuously(
     start = slots[indices[0]].start_minutes
     end = slots[indices[-1]].end_minutes
     return ScheduleBlock(
+        dailyPlanSessionId=session.dailyPlanSessionId,
         taskId=task.taskId,
         start=minutes_to_time(start),
         end=minutes_to_time(end),
@@ -410,6 +411,7 @@ def place_session_as_atomic_chunks(
         slot = slots[index]
         blocks.append(
             ScheduleBlock(
+                dailyPlanSessionId=session.dailyPlanSessionId,
                 taskId=task.taskId,
                 start=minutes_to_time(slot.start_minutes),
                 end=minutes_to_time(slot.end_minutes),
@@ -473,16 +475,31 @@ def _occupy_slots(slots: list[Slot], indices: list[int], task_id: int) -> None:
         slots[index].task_id = task_id
 
 
+def _can_merge_blocks(previous: ScheduleBlock, current: ScheduleBlock) -> bool:
+    """같은 논리 세션의 인접 블록인지 확인한다."""
+
+    if previous.dailyPlanSessionId is not None or current.dailyPlanSessionId is not None:
+        return previous.dailyPlanSessionId == current.dailyPlanSessionId
+    return previous.taskId == current.taskId
+
+
 def merge_adjacent_blocks(
     blocks: list[ScheduleBlock],
     max_continuous_minutes: int = MAX_CONTINUOUS_SCHEDULABLE_MINUTES,
 ) -> list[ScheduleBlock]:
-    """같은 taskId의 인접 블록을 하나의 블록으로 병합한다."""
+    """같은 논리 세션의 인접 블록을 하나의 블록으로 병합한다."""
 
     if not blocks:
         return []
 
-    sorted_blocks = sorted(blocks, key=lambda block: (time_to_minutes(block.start), block.taskId))
+    sorted_blocks = sorted(
+        blocks,
+        key=lambda block: (
+            time_to_minutes(block.start),
+            block.dailyPlanSessionId or 0,
+            block.taskId,
+        ),
+    )
     merged: list[ScheduleBlock] = []
 
     for block in sorted_blocks:
@@ -493,13 +510,14 @@ def merge_adjacent_blocks(
         previous = merged[-1]
         merged_duration = previous.durationMinutes + block.durationMinutes
         if (
-            previous.taskId == block.taskId
+            _can_merge_blocks(previous, block)
             and previous.end == block.start
             and merged_duration <= max_continuous_minutes
         ):
             start_minutes = time_to_minutes(previous.start)
             end_minutes = time_to_minutes(block.end)
             merged[-1] = ScheduleBlock(
+                dailyPlanSessionId=previous.dailyPlanSessionId,
                 taskId=previous.taskId,
                 start=previous.start,
                 end=block.end,
@@ -550,7 +568,9 @@ def validate_auto_placement_response(
         previous_end = end
 
     task_targets = {task.taskId: task.targetMinutes for task in request.tasks}
-    unscheduled_by_task = {item.taskId: item.unscheduledMinutes for item in response.unscheduledSessions}
+    unscheduled_by_task: dict[int, int] = defaultdict(int)
+    for item in response.unscheduledSessions:
+        unscheduled_by_task[item.taskId] += item.unscheduledMinutes
     for task_id, target_minutes in task_targets.items():
         total = scheduled_by_task.get(task_id, 0) + unscheduled_by_task.get(task_id, 0)
         if total > target_minutes:
@@ -597,7 +617,7 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
     sorted_sessions = sort_task_sessions(request.taskSessions, task_map)
 
     schedule_blocks: list[ScheduleBlock] = []
-    unscheduled_by_task: dict[int, int] = defaultdict(int)
+    unscheduled_by_session: dict[tuple[int | None, int], int] = defaultdict(int)
 
     for session in sorted_sessions:
         task = task_map[session.taskId]
@@ -623,7 +643,9 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
         )
         schedule_blocks.extend(chunk_blocks)
         if unscheduled_minutes:
-            unscheduled_by_task[session.taskId] += unscheduled_minutes
+            unscheduled_by_session[
+                (session.dailyPlanSessionId, session.taskId)
+            ] += unscheduled_minutes
 
     merged_blocks = merge_adjacent_blocks(
         schedule_blocks,
@@ -631,7 +653,7 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
     )
     # atomic fallback으로 생긴 인접 30분 블록은 응답 가독성을 위해 다시 묶는다.
     scheduled_minutes = sum(block.durationMinutes for block in merged_blocks)
-    unscheduled_minutes = sum(unscheduled_by_task.values())
+    unscheduled_minutes = sum(unscheduled_by_session.values())
     total_schedulable_minutes = sum(
         _time_block_duration_minutes(block)
         for block in request.schedulableTimeBlocks
@@ -641,11 +663,15 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
         scheduleBlocks=merged_blocks,
         unscheduledSessions=[
             UnscheduledSession(
+                dailyPlanSessionId=daily_plan_session_id,
                 taskId=task_id,
                 unscheduledMinutes=minutes,
                 reasonCode="INSUFFICIENT_TIME",
             )
-            for task_id, minutes in sorted(unscheduled_by_task.items())
+            for (daily_plan_session_id, task_id), minutes in sorted(
+                unscheduled_by_session.items(),
+                key=lambda item: (item[0][1], item[0][0] or 0),
+            )
         ],
         summary=PlacementSummary(
             scheduledMinutes=scheduled_minutes,
