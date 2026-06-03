@@ -144,7 +144,7 @@ def test_null_due_date_uses_low_deadline_score():
     assert item.deadlineLabel == "마감 없음"
 
 
-def test_active_scheduled_minutes_are_subtracted_from_remaining_minutes():
+def test_active_scheduled_minutes_are_subtracted_for_task_schedulable_remaining_min():
     response = _recommend(
         [
             _task(

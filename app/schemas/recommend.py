@@ -13,7 +13,7 @@ TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
 class RecommendCandidateDTO(BaseModel):
     """Spring이 선별해 넘긴 추천 후보 한 건.
 
-    Python은 백엔드의 remainingMin에서 유효한 예정 시간을 빼 추천 가능한 남은 시간을 계산한다.
+    Python은 백엔드의 remainingMin에서 유효한 예정 시간을 빼 태스크의 잔여 배치 가능 시간을 계산한다.
     """
 
     model_config = ConfigDict(extra="forbid")

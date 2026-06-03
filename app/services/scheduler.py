@@ -129,7 +129,7 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
 
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:
-    """백엔드 remainingMin에서 이미 유효하게 배치된 시간을 빼 추천 가능한 남은 시간을 구한다."""
+    """백엔드 remainingMin에서 이미 유효하게 배치된 시간을 빼 태스크의 잔여 배치 가능 시간을 구한다."""
 
     return (
         task.remainingMin
