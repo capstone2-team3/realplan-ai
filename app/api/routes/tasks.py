@@ -74,8 +74,8 @@ def estimate(req: EstimateRequest, request: Request):
     """Spring에서 전달한 계수와 count 기반으로 보정 소요시간을 계산한다."""
     try:
         result = estimate_initial_duration(req)
-    except CalculationError as exc:
-        return error_response(400, exc.code, exc.message, request.url.path)
+    except CalculationError:
+        raise
     except Exception:
         return error_response(
             500,

@@ -76,6 +76,27 @@ def test_unknown_request_fields_are_rejected():
     assert "systemPriorityEffect" in body["error"]["message"]
 
 
+def test_calculation_error_uses_common_format():
+    response = client.post(
+        "/tasks/estimate",
+        json={
+            "estimatedMinutes": 0,
+            "completedCount": 0,
+            "taskType": "TIME_BASED",
+            "difficulty": "MEDIUM",
+            "systemGlobalPrior": 0.0,
+            "systemTypeEffect": {},
+            "systemDifficultyEffect": {},
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 400
+    _assert_common_response(body, "FAIL", "/tasks/estimate")
+    assert body["success"] is None
+    assert body["error"]["code"] == "INVALID_ESTIMATED_MINUTES"
+
+
 def test_method_not_allowed_uses_common_format():
     response = client.get("/tasks/estimate")
     body = response.json()

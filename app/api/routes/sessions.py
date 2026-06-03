@@ -22,8 +22,8 @@ def estimate_session_remaining(req: SessionRemainingRequest, request: Request):
     """현재 세션 진행률과 집중도를 기반으로 다음 세션에 사용할 잔여시간을 계산한다."""
     try:
         result = estimate_remaining(req)
-    except CalculationError as exc:
-        return error_response(400, exc.code, exc.message, request.url.path)
+    except CalculationError:
+        raise
     except Exception:
         return error_response(
             500,

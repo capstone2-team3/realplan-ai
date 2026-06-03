@@ -22,8 +22,8 @@ def update(req: UpdateRequest, request: Request):
     """완료 태스크 관측값으로 보정 계수 갱신 결과만 계산한다."""
     try:
         result = update_coefficients(req)
-    except CalculationError as exc:
-        return error_response(400, exc.code, exc.message, request.url.path)
+    except CalculationError:
+        raise
     except Exception:
         return error_response(
             500,
