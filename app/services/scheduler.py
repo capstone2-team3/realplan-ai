@@ -21,17 +21,13 @@ class CandidateTask:
 
     taskId: int
     title: str
+    status: TaskStatus
     dueDate: date | datetime | None = None
     priority: str | None = None
-    status: TaskStatus = "PENDING"
     finalEstimatedMinutes: int | None = None
-    userAdjustedEstimatedMinutes: int | None = None
     aiEstimatedMinutes: int | None = None
     totalActualMinutes: int | None = None
     activeScheduledMinutes: int | None = None
-    totalScheduledMinutes: int | None = None
-    isDeleted: bool = False
-    isArchived: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,23 +131,16 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
 
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:
-    """최종 예측 시간에서 실제 수행 시간과 이미 잡힌 일정 시간을 빼 남은 시간을 구한다."""
+    """최종 예측 시간에서 실제 수행 시간과 유효한 예정 시간을 빼 남은 시간을 구한다."""
 
     final_estimated_minutes = _resolve_final_estimated_minutes(task)
     if final_estimated_minutes is None:
         return None
 
-    # activeScheduledMinutes가 없으면 현재 코드에서 전달 가능한 totalScheduledMinutes를 같은 의미로 사용한다.
-    scheduled_minutes = (
-        task.activeScheduledMinutes
-        if task.activeScheduledMinutes is not None
-        else task.totalScheduledMinutes
-    )
-
     return (
         final_estimated_minutes
         - _none_to_zero(task.totalActualMinutes)
-        - _none_to_zero(scheduled_minutes)
+        - _none_to_zero(task.activeScheduledMinutes)
     )
 
 
@@ -191,7 +180,7 @@ def priority_score(priority: str | None) -> int:
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
     """추천 대상이 아닌 태스크를 걸러내고 마감/중요도 기반 추천 점수를 만든다."""
 
-    if _is_excluded_status(task.status) or task.isDeleted or task.isArchived:
+    if _is_excluded_status(task.status):
         return None
 
     remaining_minutes = calculate_remaining_minutes(task)
@@ -222,11 +211,10 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
 
 
 def _resolve_final_estimated_minutes(task: CandidateTask) -> int | None:
-    """사용자 보정값을 최우선으로 보고, 없으면 AI 예측값까지 순서대로 fallback한다."""
+    """최종 확정값을 우선 사용하고, 없으면 AI 예측값으로 fallback한다."""
 
     for minutes in (
         task.finalEstimatedMinutes,
-        task.userAdjustedEstimatedMinutes,
         task.aiEstimatedMinutes,
     ):
         if minutes is not None and minutes > 0:

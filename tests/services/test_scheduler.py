@@ -21,8 +21,9 @@ def _task(
     priority: str | None = "medium",
     status: str = "PENDING",
     final_minutes: int | None = 60,
+    ai_minutes: int | None = None,
     actual_minutes: int | None = 0,
-    scheduled_minutes: int | None = 0,
+    active_scheduled_minutes: int | None = 0,
 ) -> CandidateTask:
     return CandidateTask(
         taskId=task_id,
@@ -31,8 +32,9 @@ def _task(
         priority=priority,
         status=status,
         finalEstimatedMinutes=final_minutes,
+        aiEstimatedMinutes=ai_minutes,
         totalActualMinutes=actual_minutes,
-        activeScheduledMinutes=scheduled_minutes,
+        activeScheduledMinutes=active_scheduled_minutes,
     )
 
 
@@ -145,6 +147,24 @@ def test_null_due_date_uses_low_deadline_score():
     item = response.recommendations[0]
     assert item.deadlineScore == 5
     assert item.deadlineLabel == "마감 없음"
+
+
+def test_remaining_minutes_are_calculated_from_source_time_fields():
+    response = _recommend(
+        [
+            _task(
+                1,
+                final_minutes=None,
+                ai_minutes=100,
+                actual_minutes=25,
+                active_scheduled_minutes=15,
+            )
+        ]
+    )
+
+    item = response.recommendations[0]
+    assert item.remainingMinutes == 60
+    assert item.recommendedMinutes == 60
 
 
 def test_priority_scores_are_calculated_case_insensitively():
