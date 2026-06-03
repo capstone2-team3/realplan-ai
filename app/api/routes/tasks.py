@@ -1,4 +1,4 @@
-"""태스크 관련 v1 API 라우터."""
+"""태스크 관련 API 라우터."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from app.services.classifier import (
     classify_task,
 )
 from app.services.common import CalculationError
-from app.services.predictor import calculate_prediction
+from app.services.initial_estimator.estimation import calculate_prediction
 from app.services.scheduler import CandidateTask, RecommendInput, recommend_tasks
 from app.services.task_decomposition import decompose_tasks
 

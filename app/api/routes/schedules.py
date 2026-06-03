@@ -1,4 +1,4 @@
-"""POST /v1/schedules/auto-place — 태스크 세션 자동 배치 계산."""
+"""POST /schedules/auto-place — 태스크 세션 자동 배치 계산."""
 
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 
 from app.api.exceptions import register_exception_handlers
 from app.api.response import ApiResponse
-from app.api.v1 import v1_router
+from app.api.routes import api_router
 
 app = FastAPI(
     title="RealPlan AI Service",
@@ -23,7 +23,7 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
-app.include_router(v1_router)
+app.include_router(api_router)
 
 
 @app.get("/health")

@@ -1,4 +1,4 @@
-"""세션 관련 v1 API 라우터."""
+"""세션 관련 API 라우터."""
 
 from __future__ import annotations
 
