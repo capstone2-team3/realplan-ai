@@ -11,7 +11,8 @@
 | 구분 | 테이블 | 역할 |
 |---|---|---|
 | 기존 테이블 확장 | `task` | AI 예측 시간이 마지막으로 갱신된 시각 저장 |
-| 기존 테이블 확장 | `focus_session` | 세션 시작 시점의 계획 시간과 AI 잔여시간 저장 |
+| 신규 테이블 | `daily_plan_session` | `/tasks/decompose` 분할 결과와 자동완성 세션 계획 저장 |
+| 기존 테이블 확장 | `focus_session` | 세션 시작 시점의 계획 시간, AI 잔여시간, 분할 세션 출처 저장 |
 | 기존 테이블 확장 | `session_feedback` | 세션 종료 후 잔여시간 재계산 결과 저장 |
 | 사용자 계수 | `user_ai_profile` | 사용자 단위 global 계획오류율 로그 계수 저장 |
 | 사용자 계수 | `user_ai_type_residual` | 사용자별 task type residual 저장 |
@@ -38,13 +39,52 @@
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
+| `daily_plan_session_id` | `BIGINT` | 자동완성으로 생성된 분할 세션에서 시작한 경우의 선택 FK. `daily_plan_session.daily_plan_session_id` 참조 |
 | `planned_minutes` | `INTEGER` | 해당 집중 세션에 계획되어 있던 시간. 보통 `daily_plan_task.planned_minutes` 또는 자동배치 결과의 세션 시간 |
 | `ai_remaining_before` | `INTEGER` | 세션 시작 전 AI 기준 잔여시간. 세션 종료 후 잔여시간 재계산의 기준값 |
 
 #### 저장 타이밍
 
 - 사용자가 세션을 시작할 때 저장합니다.
+- 자동완성 분할 세션에서 시작한 세션이면 `daily_plan_session_id`를 함께 저장합니다.
+- 즉석 시작, 수동 세션, 분할 결과와 무관한 세션이면 `daily_plan_session_id`는 `NULL`로 둡니다.
 - `ai_remaining_before`는 세션 시작 시점의 태스크 AI 잔여시간 또는 직전 `session_feedback.updated_ai_total_minutes - 누적 수행시간` 기준으로 저장합니다.
+
+## 일일 계획 세션 테이블
+
+### `daily_plan_session`
+
+`/tasks/decompose`가 만든 분할 세션을 백엔드가 일일 계획 단위로 저장하는 테이블입니다.
+`daily_plan_task`가 “해당 태스크가 오늘 계획에 포함됨”을 나타낸다면,
+`daily_plan_session`은 그 태스크가 몇 개의 실행 세션으로 쪼개졌는지를 나타냅니다.
+
+| 컬럼 | 타입 | API 필드 | 설명 |
+|---|---|---|---|
+| `daily_plan_session_id` | `BIGSERIAL` | 없음 | PK |
+| `daily_plan_task_id` | `BIGINT` | 없음 | 소속 일일 계획 태스크 FK. `daily_plan_task.daily_plan_task_id` 참조 |
+| `task_id` | `BIGINT` | `taskSessions[].taskId` | 원본 태스크 FK. 조회 편의를 위해 중복 저장 |
+| `user_id` | `BIGINT` | 없음 | 사용자 FK. 조회 편의를 위해 중복 저장 |
+| `session_order` | `INTEGER` | 응답 배열 순서 | 같은 `daily_plan_task_id` 안에서의 분할 세션 순서 |
+| `session_minutes` | `INTEGER` | `taskSessions[].sessionMinutes` | 분할 세션의 raw 시간. 자동배치 전에는 30분 단위가 아닐 수 있음 |
+| `required_focus_level` | `VARCHAR(10)` | `taskSessions[].requiredFocusLevel` | 자동배치 집중도 매칭에 쓰는 요구 집중도. `HIGH`, `MEDIUM`, `LOW`, `FLEXIBLE` |
+| `source_type` | `VARCHAR(10)` | 없음 | 생성 출처. 기본값 `AI`, 허용값 `AI`, `USER`, `BOTH` |
+| `status` | `VARCHAR(15)` | 없음 | 세션 계획 상태. 기본값 `PLANNED`, 허용값 `PLANNED`, `IN_PROGRESS`, `DONE`, `SKIPPED` |
+| `created_at` | `TIMESTAMP(6)` | 없음 | 생성 시각 |
+| `updated_at` | `TIMESTAMP(6)` | 없음 | 수정 시각 |
+
+#### 제약과 삭제 정책
+
+- `(daily_plan_task_id, session_order)`는 유일해야 합니다.
+- `session_minutes`는 0보다 커야 합니다.
+- `daily_plan_task`가 삭제되면 하위 `daily_plan_session`도 함께 삭제합니다.
+- `focus_session.daily_plan_session_id`는 nullable FK입니다.
+- `daily_plan_session`이 삭제되어도 실제 집중 기록은 남도록 `focus_session.daily_plan_session_id`는 `ON DELETE SET NULL` 정책을 사용합니다.
+
+#### 저장 타이밍
+
+- 백엔드가 `/tasks/decompose` 응답을 받은 뒤, 사용자가 “시간표 자동 완성” 결과를 저장하거나 확정할 때 생성합니다.
+- 같은 원본 태스크가 여러 세션으로 분할되면 같은 `daily_plan_task_id` 아래에 `session_order`만 다르게 여러 행을 저장합니다.
+- 자동배치에서 30분 단위로 올림된 시간이 실제 계획 시간으로 확정된다면, `session_minutes`에는 Python 분할 결과의 raw 시간을 저장하고 배치 결과 시간은 별도 배치/슬롯 표현에 저장하는 것을 권장합니다.
 
 ### `session_feedback`
 
@@ -341,9 +381,45 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 5. `dropped=true`이면 사용자 계수 테이블은 갱신하지 않고 로그만 남깁니다.
 6. `ai_coefficient_update_log`에 업데이트 전후 스냅샷을 저장합니다.
 
+### `/tasks/decompose`
+
+1. 백엔드가 자동완성 대상 태스크 목록과 각 태스크의 `targetMinutes`, `difficulty`, `taskType`을 Python API에 전달합니다.
+2. Python API가 `taskSessions`를 반환합니다.
+3. 백엔드는 각 원본 태스크에 대응하는 `daily_plan_task`를 준비합니다.
+4. 같은 `taskId`의 분할 세션들을 `daily_plan_session`에 저장합니다.
+5. `session_order`는 같은 `daily_plan_task_id` 안에서 1부터 증가시키거나 응답 배열 순서를 그대로 사용합니다.
+6. `required_focus_level`은 Python API 응답의 `requiredFocusLevel`을 저장합니다.
+
+#### 저장 예시
+
+```json
+{
+  "taskSessions": [
+    {
+      "taskId": 101,
+      "sessionMinutes": 60,
+      "requiredFocusLevel": "HIGH"
+    },
+    {
+      "taskId": 101,
+      "sessionMinutes": 30,
+      "requiredFocusLevel": "HIGH"
+    }
+  ]
+}
+```
+
+위 응답은 같은 `daily_plan_task_id` 아래에 `daily_plan_session` 2행으로 저장합니다.
+
+| session_order | session_minutes | required_focus_level |
+|---:|---:|---|
+| 1 | 60 | `HIGH` |
+| 2 | 30 | `HIGH` |
+
 ### `/sessions/estimate`
 
 1. 세션 시작 시 `focus_session.planned_minutes`, `focus_session.ai_remaining_before`를 저장합니다.
+   자동완성 분할 세션에서 시작했다면 `focus_session.daily_plan_session_id`도 저장합니다.
 2. 세션 종료 후 백엔드가 `elapsedMinutes`, `progress`, `focusLevel`, `previousAiTotalMinutes`를 Python API에 전달합니다.
 3. Python API가 잔여시간 재계산 결과를 반환합니다.
 4. 백엔드는 `session_feedback`에 계산 결과를 저장합니다.
@@ -357,11 +433,15 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 | 태스크 분할 | raw 시간을 그대로 세션으로 분할 |
 | 자동배치 | 실제 슬롯 배치 단계에서만 30분 단위로 올림 |
 | `daily_plan_task.planned_minutes` | 실제 일일 계획에 배치된 시간 |
+| `daily_plan_session.session_minutes` | Python 분할 결과의 raw 세션 시간 |
+| `focus_session.planned_minutes` | 실제 시작한 집중 세션에 계획되어 있던 시간 |
 
 ## 주의사항
 
-- `daily_plan_task`는 배치된 태스크를 의미하므로 미배치 잔여시간 컬럼을 추가하지 않습니다.
-- 자동배치에서 배치하지 못한 태스크/세션은 API 응답으로 처리하고, 저장이 필요하면 별도 결과 로그 테이블을 설계합니다.
+- `daily_plan_task`는 일일 계획에 포함된 원본 태스크 항목입니다.
+- `daily_plan_session`은 그 원본 태스크를 자동완성용 실행 세션으로 분할한 결과입니다.
+- 모든 `focus_session`이 `daily_plan_session`에서 파생되지는 않으므로 `focus_session.daily_plan_session_id`는 nullable입니다.
+- 자동배치에서 배치하지 못한 태스크/세션은 API 응답으로 처리하고, 저장이 필요하면 `daily_plan_session.status=SKIPPED` 또는 별도 미배치 로그 정책을 사용합니다.
 - `sample_count`는 residual별 shrinkage 계산에 사용되는 count입니다.
 - `completed_count`는 사용자 전체 완료 태스크 수이며 stage 선택과 global shrinkage에 사용됩니다.
 - `NUMERIC(10, 6)` 로그 계수는 너무 큰 값을 직접 넣지 않고 Python API의 clamp 정책을 따른 값을 저장합니다.
