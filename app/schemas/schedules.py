@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 Difficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
@@ -15,7 +15,6 @@ UnscheduledReasonCode = Literal["INSUFFICIENT_TIME", "INVALID_INPUT"]
 class TimeBlock(BaseModel):
     start: str
     end: str
-    durationMinutes: int
 
 
 class FocusTimeSlot(BaseModel):
@@ -61,6 +60,19 @@ class ScheduleBlock(BaseModel):
     end: str
     durationMinutes: int
 
+    @model_validator(mode="before")
+    @classmethod
+    def fill_duration_minutes(cls, data: Any) -> Any:
+        """테스트/내부 생성 시 start/end만 있어도 응답 길이를 계산한다."""
+        if (
+            isinstance(data, dict)
+            and "durationMinutes" not in data
+            and "start" in data
+            and "end" in data
+        ):
+            return {**data, "durationMinutes": _duration_minutes(data["start"], data["end"])}
+        return data
+
 
 class UnscheduledSession(BaseModel):
     taskId: int
@@ -79,3 +91,12 @@ class AutoPlacementResponse(BaseModel):
     scheduleBlocks: list[ScheduleBlock]
     unscheduledSessions: list[UnscheduledSession]
     summary: PlacementSummary
+
+
+def _duration_minutes(start: str, end: str) -> int:
+    return _time_to_minutes(end) - _time_to_minutes(start)
+
+
+def _time_to_minutes(value: str) -> int:
+    hour, minute = (int(part) for part in value.split(":"))
+    return hour * 60 + minute

@@ -29,6 +29,7 @@ FOCUS_LEVEL_PRIORITY = {
 ALLOWED_FOCUS_LEVELS = set(FOCUS_LEVEL_PRIORITY)
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 MAX_CONTINUOUS_SCHEDULABLE_MINUTES = 90
+MAX_SCHEDULE_MINUTES = 27 * 60
 
 
 @dataclass
@@ -53,10 +54,10 @@ def time_to_minutes(value: str) -> int:
         raise ValueError(f"시간 형식은 HH:MM이어야 합니다: {value}")
 
     hour, minute = (int(part) for part in value.split(":"))
-    if hour < 0 or hour > 24 or minute < 0 or minute >= 60:
+    if hour < 0 or hour > 27 or minute < 0 or minute >= 60:
         raise ValueError(f"유효하지 않은 시간입니다: {value}")
-    if hour == 24 and minute != 0:
-        raise ValueError(f"24시는 24:00만 허용됩니다: {value}")
+    if hour == 27 and minute != 0:
+        raise ValueError(f"27시는 27:00만 허용됩니다: {value}")
 
     return hour * 60 + minute
 
@@ -64,7 +65,7 @@ def time_to_minutes(value: str) -> int:
 def minutes_to_time(value: int) -> str:
     """자정 기준 분을 HH:MM 문자열로 변환한다."""
 
-    if value < 0 or value > 24 * 60:
+    if value < 0 or value > MAX_SCHEDULE_MINUTES:
         raise ValueError(f"시간 범위를 벗어났습니다: {value}")
     return f"{value // 60:02d}:{value % 60:02d}"
 
@@ -135,13 +136,9 @@ def _validate_schedulable_blocks(blocks: list[TimeBlock], slot_unit_minutes: int
         if start % slot_unit_minutes != 0 or end % slot_unit_minutes != 0:
             raise ValueError("schedulableTimeBlocks의 start/end는 30분 단위여야 합니다.")
 
-        duration = end - start
-        if block.durationMinutes != duration:
-            raise ValueError(
-                f"schedulableTimeBlocks[{index}]의 durationMinutes가 start/end와 일치하지 않습니다."
-            )
+        duration = _time_block_duration_minutes(block)
         if duration % slot_unit_minutes != 0:
-            raise ValueError("schedulableTimeBlocks의 durationMinutes는 30의 배수여야 합니다.")
+            raise ValueError("schedulableTimeBlocks의 길이는 30의 배수여야 합니다.")
         parsed_blocks.append((start, end, index))
 
     parsed_blocks.sort()
@@ -150,6 +147,12 @@ def _validate_schedulable_blocks(blocks: list[TimeBlock], slot_unit_minutes: int
         if previous_end is not None and start < previous_end:
             raise ValueError("schedulableTimeBlocks끼리 겹칠 수 없습니다.")
         previous_end = end
+
+
+def _time_block_duration_minutes(block: TimeBlock) -> int:
+    """요청의 start/end에서 가용 블록 길이를 계산한다."""
+
+    return time_to_minutes(block.end) - time_to_minutes(block.start)
 
 
 def build_slots(
@@ -603,7 +606,8 @@ def auto_place_sessions(request: AutoPlacementRequest) -> AutoPlacementResponse:
     scheduled_minutes = sum(block.durationMinutes for block in merged_blocks)
     unscheduled_minutes = sum(unscheduled_by_task.values())
     total_schedulable_minutes = sum(
-        block.durationMinutes for block in request.schedulableTimeBlocks
+        _time_block_duration_minutes(block)
+        for block in request.schedulableTimeBlocks
     )
 
     response = AutoPlacementResponse(
