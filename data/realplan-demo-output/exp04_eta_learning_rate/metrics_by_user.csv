@@ -1,3 +1,0 @@
-﻿experiment,user_name,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
-exp04_eta_learning_rate,나영,5,5,-82.26,107.78,38.9,3.11,3.11,2.4,104.67,97.11,36.5
-exp04_eta_learning_rate,세진,11,11,-72.04,113.53,40.4,-20.26,25.81,4.09,87.72,77.27,36.31
