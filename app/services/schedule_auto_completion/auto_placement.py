@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import re
 from typing import Optional
 
-from app.schemas.schedules import (
+from app.schemas.auto_placement import (
     AutoPlacementRequest,
     AutoPlacementResponse,
     FocusTimeSlot,
@@ -18,7 +18,7 @@ from app.schemas.schedules import (
     TimeBlock,
     UnscheduledSession,
 )
-from app.services.focus_matching import (
+from app.services.shared.focus_matching import (
     ALLOWED_FOCUS_LEVELS,
     FOCUS_LEVEL_PRIORITY,
     calculate_focus_fit_score,

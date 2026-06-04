@@ -6,13 +6,13 @@ import asyncio
 
 import pytest
 
-from app.schemas.tasks import (
+from app.schemas.decomposition import (
     TaskDecompositionRequest,
     TaskDecompositionResponse,
     TaskSession,
 )
-from app.services import task_decomposition
-from app.services.task_decomposition import (
+from app.services.schedule_auto_completion import task_decomposition
+from app.services.schedule_auto_completion.task_decomposition import (
     TASK_DECOMPOSITION_JSON_SCHEMA,
     fallback_decompose,
     inject_required_focus_levels,

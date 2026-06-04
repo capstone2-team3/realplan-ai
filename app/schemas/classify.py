@@ -6,7 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.services.classifier import TaskType
+from app.schemas.common import TaskType
 
 
 class HistoricalTaskDTO(BaseModel):

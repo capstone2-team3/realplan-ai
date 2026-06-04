@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from app.schemas.session import FocusLevel, SessionRemainingRequest
 from app.services.common import CalculationError
-from app.services.session_estimator import (
+from app.services.session_progress.remaining_estimator import (
     BLENDING_WEIGHT_BASE,
     FOCUS_WEIGHT_MAP,
     estimate_remaining,

@@ -12,13 +12,13 @@ import json
 from typing import Optional
 
 from app.core.config import OPENAI_API_KEY
-from app.services.classifier.constants import DEFAULT_OPENAI_MODEL
-from app.services.classifier.personalization import (
+from app.services.task_registration.classifier.constants import DEFAULT_OPENAI_MODEL
+from app.services.task_registration.classifier.personalization import (
     KeywordPersonalization,
     PersonalizationLayer,
 )
-from app.services.classifier.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT
-from app.services.classifier.types import (
+from app.services.task_registration.classifier.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT
+from app.services.task_registration.classifier.types import (
     ClassifyInput,
     ClassifyOutput,
     TaskType,

@@ -12,16 +12,16 @@ from app.schemas.recommend import (
     RecommendRequest,
     RecommendResponse,
 )
-from app.schemas.tasks import TaskDecompositionRequest, TaskDecompositionResponse
-from app.services.classifier import (
+from app.schemas.decomposition import TaskDecompositionRequest, TaskDecompositionResponse
+from app.services.task_registration.classifier import (
     ClassifyInput,
     HistoricalTask,
     classify_task,
 )
 from app.services.common import CalculationError
-from app.services.initial_estimator.estimation import estimate_initial_duration
-from app.services.scheduler import CandidateTask, RecommendInput, recommend_tasks
-from app.services.task_decomposition import decompose_tasks
+from app.services.task_registration.initial_estimator.estimation import estimate_initial_duration
+from app.services.task_recommendation.scheduler import CandidateTask, RecommendInput, recommend_tasks
+from app.services.schedule_auto_completion.task_decomposition import decompose_tasks
 
 router = APIRouter()
 

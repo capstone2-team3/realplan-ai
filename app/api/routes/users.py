@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from app.api.response import ApiResponse, error_response
 from app.schemas.update import UpdateRequest, UpdateResponse
 from app.services.common import CalculationError
-from app.services.updater import update_coefficients
+from app.services.profile_calibration.updater import update_coefficients
 
 router = APIRouter()
 

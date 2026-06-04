@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.initial_estimator.router import default_router
+from app.services.task_registration.initial_estimator.router import default_router
 
 
 def update_coefficients(req: UpdateRequest) -> UpdateResponse:

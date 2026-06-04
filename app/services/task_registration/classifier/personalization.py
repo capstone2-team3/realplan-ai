@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
-from app.services.classifier.types import HistoricalTask, TaskType
+from app.services.task_registration.classifier.types import HistoricalTask, TaskType
 
 
 class PersonalizationLayer(Protocol):

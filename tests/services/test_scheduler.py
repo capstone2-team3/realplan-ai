@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app.services.scheduler import (
+from app.services.task_recommendation.scheduler import (
     CandidateTask,
     RecommendInput,
     deadline_score,

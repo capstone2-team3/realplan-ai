@@ -6,8 +6,8 @@ import json
 from types import SimpleNamespace
 
 from app.schemas.classify import ClassifyResponse
-from app.services.classifier.classification import classify_task
-from app.services.classifier.types import ClassifyInput, HistoricalTask, TaskType
+from app.services.task_registration.classifier.classification import classify_task
+from app.services.task_registration.classifier.types import ClassifyInput, HistoricalTask, TaskType
 
 
 class FakeChatCompletions:

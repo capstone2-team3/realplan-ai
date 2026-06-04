@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.initial_estimator.base import PlanningStage
+from app.services.task_registration.initial_estimator.base import PlanningStage
 
 
 class MainEffectStage(PlanningStage):

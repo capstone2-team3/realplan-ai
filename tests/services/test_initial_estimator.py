@@ -8,7 +8,7 @@ import pytest
 
 from app.schemas.estimate import EstimateRequest
 from app.schemas.update import UpdateRequest
-from app.services.initial_estimator.constants import (
+from app.services.task_registration.initial_estimator.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
     DIFFICULTY_SHRINKAGE_N,
@@ -28,10 +28,10 @@ from app.services.initial_estimator.constants import (
     USER_GLOBAL_SHRINKAGE_N,
     EARLY_THRESHOLD,
 )
-from app.services.initial_estimator.average_stage import AverageBaselineStage
-from app.services.initial_estimator.router import PlanningRouter
-from app.services.initial_estimator.rule_stage import RuleStage
-from app.services.initial_estimator.training_record import build_initial_training_record
+from app.services.task_registration.initial_estimator.average_stage import AverageBaselineStage
+from app.services.task_registration.initial_estimator.router import PlanningRouter
+from app.services.task_registration.initial_estimator.rule_stage import RuleStage
+from app.services.task_registration.initial_estimator.training_record import build_initial_training_record
 
 
 SYSTEM_GLOBAL = 0.1

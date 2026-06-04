@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from app.api.response import ApiResponse
-from app.schemas.schedules import AutoPlacementRequest, AutoPlacementResponse
-from app.services.auto_placement import auto_place_sessions
+from app.schemas.auto_placement import AutoPlacementRequest, AutoPlacementResponse
+from app.services.schedule_auto_completion.auto_placement import auto_place_sessions
 
 router = APIRouter()
 

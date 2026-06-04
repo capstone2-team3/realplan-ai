@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.schemas.schedules import (
+from app.schemas.auto_placement import (
     AutoPlacementRequest,
     FocusTimeSlot,
     PlacementTask,
@@ -13,7 +13,7 @@ from app.schemas.schedules import (
     TimeBlock,
     UnscheduledSession,
 )
-from app.services.auto_placement import (
+from app.services.schedule_auto_completion.auto_placement import (
     auto_place_sessions,
     build_slots,
     merge_adjacent_blocks,
@@ -21,7 +21,7 @@ from app.services.auto_placement import (
     time_to_minutes,
     validate_auto_placement_request,
 )
-from app.services.focus_matching import calculate_focus_fit_score
+from app.services.shared.focus_matching import calculate_focus_fit_score
 
 
 def _task(

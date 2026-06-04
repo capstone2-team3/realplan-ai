@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from app.api.response import ApiResponse, error_response
 from app.schemas.session import SessionRemainingRequest, SessionRemainingResponse
 from app.services.common import CalculationError
-from app.services.session_estimator import estimate_remaining
+from app.services.session_progress.remaining_estimator import estimate_remaining
 
 router = APIRouter()
 

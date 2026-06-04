@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.schemas.estimate import EstimateRequest, EstimateResponse
-from app.services.initial_estimator.router import default_router
+from app.services.task_registration.initial_estimator.router import default_router
 
 
 def estimate_initial_duration(req: EstimateRequest) -> EstimateResponse:

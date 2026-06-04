@@ -6,7 +6,7 @@ import math
 from typing import Any
 
 from app.schemas.update import UpdateRequest
-from app.services.initial_estimator.update_policy import (
+from app.services.task_registration.initial_estimator.update_policy import (
     clamp_log_ratio,
     compute_log_ratio,
     compute_ratio,

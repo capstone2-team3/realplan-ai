@@ -19,7 +19,7 @@ Swagger UI: http://localhost:8000/docs
 |---|---|---|
 | `OPENAI_API_KEY` | OpenAI API 키 (필수, `/tasks/classify`, `/tasks/decompose`에서 사용) | — |
 
-분류용 기본 모델은 `app/services/classifier/constants.py`에서 관리합니다.
+분류용 기본 모델은 `app/services/task_registration/classifier/constants.py`에서 관리합니다.
 
 ## 엔드포인트
 
@@ -59,7 +59,14 @@ app/
 │   ├── exceptions.py    # 공통 예외 핸들러
 │   └── routes/          # 엔드포인트별 라우터
 ├── schemas/             # Pydantic DTO (Spring DTO와 1:1)
-├── services/            # 도메인 로직 (분류/예측/추천)
+├── services/            # 기능별 AI 계산 로직
+│   ├── task_registration/       # 태스크 등록: 유형 분류, 초기 소요 시간 예측
+│   ├── session_progress/        # 태스크 수행 중: 세션 종료 후 잔여 시간 예측
+│   ├── profile_calibration/     # 태스크 완료 후 사용자 보정 계수 갱신
+│   ├── task_recommendation/     # 특정 일자 미완료 태스크 추천
+│   ├── schedule_auto_completion/ # 추천 태스크 분할 및 자동 배치
+│   ├── shared/                  # 여러 기능이 공유하는 정책/계산
+│   └── common/                  # 공통 예외
 └── core/
     └── config.py        # 환경변수 로드
 tests/                   # pytest
@@ -74,18 +81,20 @@ uv run pytest
 ## 코드 분석 가이드
 
 처음 합류한 사람이 코드 구조와 읽는 순서를 빠르게 잡을 수 있도록
-[`docs/CODE_ANALYSIS_GUIDE.md`](docs/CODE_ANALYSIS_GUIDE.md)에 온보딩 가이드를 정리했습니다.
+[`docs/CODE_GUIDE.md`](docs/CODE_GUIDE.md)에 온보딩 가이드를 정리했습니다.
 
 백엔드 연동용 API 명세는 [`docs/API_SPEC.md`](docs/API_SPEC.md)에 정리했습니다.
 
-## 핵심 모델
+## 핵심 기능 구조
 
-- **분류기 (`services/classifier`)** — Task 이름을 3가지 유형으로 분류
-  - `TIME_BASED` (시간형) / `QUANTITY_BASED` (분량형) / `SATISFACTION_BASED` (만족형)
-  - 사용자 과거 이력이 있으면 `PersonalizationLayer`로 일관성 유지
-- **예측기 (`services/initial_estimator`)** — `corrected = user_estimate × multiplier`
-  - 유형별 베이스 계수 × 난이도 가중치
-  - 세션 완료 후 EMA로 점진 갱신 (집중도 정규화 포함)
-- **추천기 (`services/scheduler`)** — Multi-choice 0/1 Knapsack
-  - 마감 긴급도 + 우선순위 + 소요시간 → 중요도 점수
-  - 분할 가능한 Task는 부분 수행 옵션도 후보에 포함
+- **태스크 등록 (`services/task_registration`)**
+  - `classifier`: OpenAI 기반 태스크 유형 분류
+  - `initial_estimator`: 태스크 초기 소요 시간 예측
+- **태스크 수행 중 (`services/session_progress`)**
+  - 세션 종료 시 진행률·집중도를 기반으로 잔여 소요 시간 재예측
+- **태스크 완료 후 (`services/profile_calibration`)**
+  - 실제 소요 시간으로 사용자 계획오류 보정 계수 갱신
+- **태스크 추천 (`services/task_recommendation`)**
+  - 특정 일자에 수행하기 좋은 미완료 태스크 최대 4개 추천
+- **시간표 자동 완성 (`services/schedule_auto_completion`)**
+  - 추천 태스크를 세션으로 분할하고, 사용자의 빈 가용 시간대에 자동 배치

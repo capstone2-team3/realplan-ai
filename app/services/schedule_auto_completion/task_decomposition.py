@@ -11,7 +11,7 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from app.schemas.tasks import (
+from app.schemas.decomposition import (
     TaskDecompositionRequest,
     TaskDecompositionResponse,
     TaskSession,

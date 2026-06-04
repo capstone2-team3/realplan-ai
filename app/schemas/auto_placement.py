@@ -6,9 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.common import RequiredFocusLevel, TaskDifficulty
 
-Difficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
-RequiredFocusLevel = Literal["HIGH", "MEDIUM", "LOW", "FLEXIBLE"]
 UnscheduledReasonCode = Literal["INSUFFICIENT_TIME", "INVALID_INPUT"]
 
 
@@ -32,7 +31,7 @@ class PlacementTask(BaseModel):
     isDueToday: bool
     recommendScore: float
     targetMinutes: int
-    difficulty: Difficulty
+    difficulty: TaskDifficulty
 
 
 class PlacementTaskSession(BaseModel):

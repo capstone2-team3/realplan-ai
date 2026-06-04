@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from app.services.common.exceptions import CalculationError
-from app.services.initial_estimator.constants import (
+from app.services.task_registration.initial_estimator.constants import (
     CLAMP_MAX,
     CLAMP_MIN,
     DROP_RATIO_MAX,

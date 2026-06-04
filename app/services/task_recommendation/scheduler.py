@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal
 
-from app.services.focus_matching import calculate_focus_fit_score
+from app.services.shared.focus_matching import calculate_focus_fit_score
 
 MAX_RECOMMENDATION_COUNT = 4
 NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."

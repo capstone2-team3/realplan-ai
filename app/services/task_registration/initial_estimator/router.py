@@ -7,18 +7,18 @@ import math
 
 from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.initial_estimator.average_stage import AverageBaselineStage
-from app.services.initial_estimator.constants import (
+from app.services.task_registration.initial_estimator.average_stage import AverageBaselineStage
+from app.services.task_registration.initial_estimator.constants import (
     EARLY_THRESHOLD,
     MAIN_THRESHOLD,
     STAGE_MAIN,
     STAGE_MAIN_FALLBACK,
     STAGE_RULE_AVERAGE_BLEND,
 )
-from app.services.initial_estimator.interaction_stage import InteractionStage
-from app.services.initial_estimator.main_stage import MainEffectStage
-from app.services.initial_estimator.rule_stage import RuleStage
-from app.services.initial_estimator.update_policy import validate_estimated_minutes
+from app.services.task_registration.initial_estimator.interaction_stage import InteractionStage
+from app.services.task_registration.initial_estimator.main_stage import MainEffectStage
+from app.services.task_registration.initial_estimator.rule_stage import RuleStage
+from app.services.task_registration.initial_estimator.update_policy import validate_estimated_minutes
 
 logger = logging.getLogger(__name__)
 

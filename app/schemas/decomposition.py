@@ -2,14 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
-
-TaskType = Literal["TIME_BASED", "SATISFACTION_BASED", "QUANTITY_BASED"]
-TaskDifficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
-RequiredFocusLevel = Literal["HIGH", "MEDIUM", "LOW", "FLEXIBLE"]
+from app.schemas.common import RequiredFocusLevel, TaskDifficulty, TaskType
 
 
 class TaskDecompositionItem(BaseModel):

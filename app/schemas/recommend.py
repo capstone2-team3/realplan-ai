@@ -7,9 +7,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.common import TaskDifficulty, TaskType
+
 TaskStatus = Literal["PENDING", "IN_PROGRESS"]
-TaskType = Literal["TIME_BASED", "QUANTITY_BASED", "SATISFACTION_BASED"]
-Difficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 TimeBand = Literal["06-12", "12-18", "18-24"]
 
 
@@ -31,7 +31,7 @@ class RecommendCandidateDTO(BaseModel):
     dueDate: date | datetime | None = None
     importance: str
     taskType: TaskType | None = None
-    difficulty: Difficulty | None = None
+    difficulty: TaskDifficulty | None = None
     status: TaskStatus
     remainingMin: int = Field(..., gt=0)
     activeScheduledMin: int | None = Field(default=0, ge=0)

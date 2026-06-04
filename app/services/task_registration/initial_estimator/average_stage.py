@@ -7,8 +7,8 @@ import math
 
 from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
-from app.services.initial_estimator.base import PlanningStage
-from app.services.initial_estimator.constants import (
+from app.services.task_registration.initial_estimator.base import PlanningStage
+from app.services.task_registration.initial_estimator.constants import (
     DIFFICULTY_SHRINKAGE_N,
     ETA_DIFFICULTY,
     ETA_FOLDER,
@@ -19,7 +19,7 @@ from app.services.initial_estimator.constants import (
     TYPE_SHRINKAGE_N,
     USER_GLOBAL_SHRINKAGE_N,
 )
-from app.services.initial_estimator.update_policy import (
+from app.services.task_registration.initial_estimator.update_policy import (
     clamp_log_ratio,
     compute_log_ratio,
     compute_ratio,
