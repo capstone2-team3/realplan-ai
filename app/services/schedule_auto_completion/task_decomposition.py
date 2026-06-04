@@ -33,10 +33,30 @@ DIFFICULTY_FOCUS_MAP = {
     "UNKNOWN": "FLEXIBLE",
 }
 
-SYSTEM_PROMPT = """You are a task decomposition API for RealPlan, a study planning application.
-Your only job is to split each given task into recommended study/work sessions.
-A separate Python scheduler will place these sessions into actual time slots later.
-You must not assign start times, end times, dates, or schedule positions.
+SYSTEM_PROMPT = """You are an assistant that decomposes tasks into focused work sessions.
+
+Your job is to decide how long each focused work session should be for each task.
+
+You must use the task's title, memo, taskType, difficulty, and targetMinutes to infer a reasonable session structure.
+
+Think about the nature of the work:
+- Some tasks are best done in one uninterrupted session.
+- Some tasks should be split into several shorter sessions because they require sustained concentration.
+- Some tasks naturally have phases, such as preparation, execution, review, practice, or revision.
+- Some tasks are lightweight and can remain as a single short session.
+- Some tasks are cognitively demanding and should not be split into overly long sessions.
+- Some tasks are mechanical or time-based and can tolerate longer continuous sessions.
+
+Use taskType as a guide:
+- TIME_BASED tasks: preserve the required total time and split only when a single session would be too long or cognitively unreasonable.
+- QUANTITY_BASED tasks: split according to natural units of progress, such as problems, pages, repetitions, practice sets, or review cycles when such structure can be inferred.
+- SATISFACTION_BASED tasks: prefer session lengths that allow meaningful progress without excessive fatigue, especially for creative, writing, planning, or open-ended work.
+
+Use difficulty as a guide:
+- HIGH difficulty tasks usually require shorter focused sessions than easy mechanical tasks.
+- MEDIUM difficulty tasks can use moderate session lengths.
+- LOW difficulty tasks may remain in longer sessions if the work is simple or repetitive.
+- UNKNOWN difficulty tasks should be handled conservatively based on title, memo, and taskType.
 
 Return valid JSON only.
 Do not output markdown, comments, explanations, or text outside the JSON.
@@ -56,65 +76,28 @@ Return exactly this JSON structure:
 
 SESSION LENGTH RULES
 
-1. Decompose each task based on its targetMinutes.
-2. sessionMinutes represents the length of one decomposed session.
-3. For each task, the sum of sessionMinutes must exactly equal that task's targetMinutes.
-4. sessionMinutes may be a raw minute value and does not have to be a multiple of slotUnitMinutes.
-5. In MVP, slotUnitMinutes is 30 and the scheduler will round sessions up before placement.
-6. Minimum sessionMinutes is 1.
-7. Preferred session lengths are around 30, 60, and 90 minutes when natural.
-8. Never create a session longer than maxContinuousSchedulableMinutes.
-9. If targetMinutes is greater than maxContinuousSchedulableMinutes, split it into multiple sessions, each no longer than maxContinuousSchedulableMinutes.
-10. If targetMinutes is less than 30, return exactly one session with that raw targetMinutes value.
-11. If targetMinutes is 60, return either one 60-minute session or two 30-minute sessions only when the task naturally has two distinct phases.
-
-DECOMPOSITION GUIDELINES
-
-Use title and taskType to create natural session divisions.
-
-taskType is one of:
-- TIME_BASED
-- SATISFACTION_BASED
-- QUANTITY_BASED
-
-TIME_BASED:
-- The task is defined mainly by fixed duration.
-- Preserve the total targetMinutes.
-- Prefer simple time-based sessions.
-- Do not over-decompose unless targetMinutes is long.
-- Example: 90 minutes -> 60 + 30.
-
-SATISFACTION_BASED:
-- The task ends when the user feels sufficiently satisfied.
-- Prefer 30-minute or 60-minute sessions.
-- Avoid overly long sessions.
-
-QUANTITY_BASED:
-- The task ends when a fixed amount of work is completed.
-- Split into practical work chunks.
-- For problem solving, reading, memorization, or similar quantity-based work, use focused work sessions plus optional review/check session.
-
-Prefer 30-minute and 60-minute sessions for MVP stability.
-Use 90-minute sessions only for cognitively demanding tasks when maxContinuousSchedulableMinutes is at least 90.
-
-Do not invent taskIds.
-Only use taskIds from the input.
-
-Do not create session titles.
-The app will use the original task title as the session title.
+Hard constraints:
+- Every input task must have at least one output session.
+- Each output session must reference a valid input taskId.
+- sessionMinutes must be a positive integer.
+- sessionMinutes must be less than or equal to maxContinuousSchedulableMinutes.
+- For each task, the sum of sessionMinutes must equal that task's targetMinutes exactly.
+- sessionMinutes does not have to be a multiple of slotUnitMinutes.
+- Do not create dates, start times, end times, titles, explanations, or requiredFocusLevel.
+- Return only the JSON object that matches the schema.
 
 SELF-CHECK BEFORE RESPONDING
 
 Before returning the JSON, verify internally:
 
 1. Every taskId exists in the input.
-2. Every sessionMinutes is greater than 0.
-3. sessionMinutes may be raw minutes and does not have to be a multiple of slotUnitMinutes.
+2. Every input task has at least one output session.
+3. Every sessionMinutes is a positive integer.
 4. Every sessionMinutes is less than or equal to maxContinuousSchedulableMinutes.
 5. For each task, the sum of sessionMinutes equals targetMinutes exactly.
-6. No requiredFocusLevel is included.
-7. No start time, end time, date, or schedule position is included.
-8. No session title is included.
+6. sessionMinutes is not required to be a multiple of slotUnitMinutes.
+7. No requiredFocusLevel is included.
+8. No start time, end time, date, schedule position, session title, or explanation is included.
 9. No extra text is included outside the JSON.
 
 If any check fails, fix the JSON before responding."""
@@ -177,12 +160,29 @@ def build_openai_messages(request: TaskDecompositionRequest) -> list[dict[str, s
 
 def _openai_request_payload(request: TaskDecompositionRequest) -> dict[str, Any]:
     return {
+        "fieldDescriptions": {
+            "slotUnitMinutes": (
+                "The scheduling slot unit used later by the auto-placement step. "
+                "It is provided for context only. Do not force sessionMinutes to be "
+                "a multiple of slotUnitMinutes."
+            ),
+            "maxContinuousSchedulableMinutes": (
+                "The maximum allowed length of a single continuous session. "
+                "No session may exceed this value."
+            ),
+            "targetMinutes": (
+                "The exact amount of time that must be decomposed for this task. "
+                "For each task, the sum of all generated sessionMinutes must equal "
+                "targetMinutes exactly."
+            ),
+        },
         "slotUnitMinutes": request.slotUnitMinutes,
         "maxContinuousSchedulableMinutes": request.maxContinuousSchedulableMinutes,
         "tasks": [
             {
                 "taskId": task.taskId,
                 "title": task.title,
+                "memo": task.memo,
                 "taskType": task.taskType,
                 "difficulty": task.difficulty,
                 "targetMinutes": _target_minutes(task),
@@ -285,8 +285,8 @@ def validate_request(request: TaskDecompositionRequest) -> None:
     slot_unit = request.slotUnitMinutes
     max_continuous = request.maxContinuousSchedulableMinutes
 
-    if slot_unit != 30:
-        raise ValueError("slotUnitMinutes는 30이어야 합니다.")
+    if slot_unit <= 0:
+        raise ValueError("slotUnitMinutes는 0보다 커야 합니다.")
     if max_continuous < slot_unit:
         raise ValueError("maxContinuousSchedulableMinutes는 slotUnitMinutes 이상이어야 합니다.")
     if max_continuous % slot_unit != 0:
@@ -359,37 +359,27 @@ def validate_decomposition_response(
             )
 
 
-def _fallback_session_minutes(target_minutes: int, max_continuous_minutes: int) -> list[int]:
-    """MVP 안정성을 위해 60분 중심으로 기본 분할한다.
+def _fallback_session_minutes(
+    target_minutes: int,
+    slot_unit_minutes: int,
+    max_continuous_minutes: int,
+) -> list[int]:
+    """백엔드가 전달한 슬롯 단위와 최대 연속 시간을 기준으로 기본 분할한다.
 
     OpenAI가 실패해도 자동 배치가 계속 동작하도록 예측 가능한 세션 길이를 만든다.
     """
 
-    if max_continuous_minutes <= 30:
-        sessions: list[int] = []
-        remaining = target_minutes
-        while remaining > 0:
-            minutes = min(30, remaining)
-            sessions.append(minutes)
-            remaining -= minutes
-        return sessions
-
-    if target_minutes <= 60:
+    preferred_minutes = min(max(slot_unit_minutes * 2, slot_unit_minutes), max_continuous_minutes)
+    if preferred_minutes <= 0:
+        preferred_minutes = max_continuous_minutes
+    if target_minutes <= preferred_minutes:
         return [target_minutes]
-    if target_minutes == 90:
-        return [60, 30]
-    if target_minutes == 120:
-        return [60, 60]
-    if target_minutes == 150:
-        return [60, 60, 30]
-    if target_minutes == 180:
-        return [60, 60, 60]
 
     sessions: list[int] = []
     remaining = target_minutes
-    while remaining >= 60:
-        sessions.append(60)
-        remaining -= 60
+    while remaining > preferred_minutes:
+        sessions.append(preferred_minutes)
+        remaining -= preferred_minutes
     if remaining:
         sessions.append(remaining)
     return sessions
@@ -407,6 +397,7 @@ def fallback_decompose(request: TaskDecompositionRequest) -> TaskDecompositionRe
         focus_level = DIFFICULTY_FOCUS_MAP[task.difficulty]
         for minutes in _fallback_session_minutes(
             target_minutes=_target_minutes(task),
+            slot_unit_minutes=request.slotUnitMinutes,
             max_continuous_minutes=request.maxContinuousSchedulableMinutes,
         ):
             sessions.append(

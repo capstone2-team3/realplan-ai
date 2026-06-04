@@ -10,6 +10,7 @@ from app.schemas.common import RequiredFocusLevel, TaskDifficulty, TaskType
 class TaskDecompositionItem(BaseModel):
     taskId: int = Field(..., description="입력 task의 고유 ID")
     title: str = Field(..., description="태스크명")
+    memo: str | None = Field(default=None, description="태스크 상세 메모")
     taskType: TaskType = Field(..., description="태스크 유형")
     difficulty: TaskDifficulty = Field(..., description="태스크 난이도")
     remainingMin: int = Field(..., gt=0, description="백엔드 remainingMin")
@@ -21,7 +22,10 @@ class TaskDecompositionItem(BaseModel):
 
 
 class TaskDecompositionRequest(BaseModel):
-    slotUnitMinutes: int = Field(..., description="자동 배치 단위. MVP에서는 30")
+    slotUnitMinutes: int = Field(
+        ...,
+        description="백엔드가 전달한 자동 배치 기본 슬롯 단위",
+    )
     maxContinuousSchedulableMinutes: int = Field(..., description="가장 긴 연속 배치 가능 시간")
     tasks: list[TaskDecompositionItem] = Field(..., description="분할할 태스크 목록")
 

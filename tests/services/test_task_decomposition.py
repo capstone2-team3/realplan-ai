@@ -68,6 +68,48 @@ def test_validate_request_rejects_duplicate_task_id():
         validate_request(req)
 
 
+@pytest.mark.parametrize(
+    ("slot_unit_minutes", "max_continuous_minutes"),
+    [
+        (15, 90),
+        (10, 60),
+        (30, 90),
+    ],
+)
+def test_validate_request_accepts_backend_slot_unit_policy(
+    slot_unit_minutes,
+    max_continuous_minutes,
+):
+    req = _make_request(
+        slotUnitMinutes=slot_unit_minutes,
+        maxContinuousSchedulableMinutes=max_continuous_minutes,
+    )
+
+    validate_request(req)
+
+
+@pytest.mark.parametrize(
+    ("slot_unit_minutes", "max_continuous_minutes", "message"),
+    [
+        (0, 90, "slotUnitMinutes"),
+        (15, 10, "slotUnitMinutes 이상"),
+        (20, 90, "배수"),
+    ],
+)
+def test_validate_request_rejects_invalid_slot_unit_policy(
+    slot_unit_minutes,
+    max_continuous_minutes,
+    message,
+):
+    req = _make_request(
+        slotUnitMinutes=slot_unit_minutes,
+        maxContinuousSchedulableMinutes=max_continuous_minutes,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        validate_request(req)
+
+
 def test_fallback_remaining_30_returns_single_session():
     req = _make_request(
         tasks=[
@@ -116,7 +158,7 @@ def test_fallback_preserves_raw_remaining_minutes():
         (210, [60, 60, 60, 30]),
     ],
 )
-def test_fallback_uses_stable_60_minute_chunks(target_minutes, expected):
+def test_fallback_uses_stable_two_slot_chunks(target_minutes, expected):
     req = _make_request(
         tasks=[
             dict(
@@ -155,6 +197,27 @@ def test_fallback_uses_schedulable_remaining_minutes():
     validate_decomposition_response(req, response)
 
 
+def test_fallback_uses_backend_slot_unit_policy():
+    req = _make_request(
+        slotUnitMinutes=15,
+        maxContinuousSchedulableMinutes=60,
+        tasks=[
+            dict(
+                taskId=1,
+                title="발표자료 수정",
+                taskType="SATISFACTION_BASED",
+                difficulty="MEDIUM",
+                remainingMin=80,
+            )
+        ],
+    )
+
+    response = fallback_decompose(req)
+
+    assert _minutes(response) == [30, 30, 20]
+    validate_decomposition_response(req, response)
+
+
 def test_validate_request_rejects_no_schedulable_remaining_minutes():
     req = _make_request(
         tasks=[
@@ -179,6 +242,7 @@ def test_openai_messages_use_derived_target_minutes():
             dict(
                 taskId=1,
                 title="발표자료 수정",
+                memo="초안 검토와 발표 흐름 정리",
                 taskType="SATISFACTION_BASED",
                 difficulty="MEDIUM",
                 remainingMin=120,
@@ -191,8 +255,19 @@ def test_openai_messages_use_derived_target_minutes():
     payload = json.loads(messages[1]["content"])
 
     assert payload["tasks"][0]["targetMinutes"] == 90
+    assert payload["tasks"][0]["memo"] == "초안 검토와 발표 흐름 정리"
     assert "remainingMin" not in payload["tasks"][0]
     assert "activeScheduledMin" not in payload["tasks"][0]
+
+
+def test_openai_messages_include_null_memo_when_missing():
+    req = _make_request()
+
+    messages = task_decomposition.build_openai_messages(req)
+    payload = json.loads(messages[1]["content"])
+
+    assert "memo" in payload["tasks"][0]
+    assert payload["tasks"][0]["memo"] is None
 
 
 def test_fallback_respects_30_minute_max_continuous():

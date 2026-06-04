@@ -1042,6 +1042,7 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
     {
       "taskId": 101,
       "title": "자료구조 5장 문제풀이",
+      "memo": "그래프 최단경로 문제 풀이와 오답 정리",
       "taskType": "QUANTITY_BASED",
       "difficulty": "HIGH",
       "remainingMin": 120,
@@ -1050,6 +1051,7 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
     {
       "taskId": 203,
       "title": "캡스톤 발표자료 수정",
+      "memo": "발표 흐름 재정리와 슬라이드 문구 수정",
       "taskType": "SATISFACTION_BASED",
       "difficulty": "MEDIUM",
       "remainingMin": 90,
@@ -1063,11 +1065,12 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
 
 | 필드 | 타입 | 필수 | 기본값 | 제약 | 설명 |
 |---|---|---:|---|---|---|
-| `slotUnitMinutes` | integer | Y | 없음 | `30`만 허용 | 세션 최소 단위. MVP에서는 30분 |
+| `slotUnitMinutes` | integer | Y | 없음 | `> 0` | 자동 배치에서 사용하는 기본 시간 슬롯 단위. 백엔드가 현재 서비스 정책에 따라 전달하며, Python은 특정 값으로 고정하지 않고 이 값을 기준으로 계산 가능한지 검증 |
 | `maxContinuousSchedulableMinutes` | integer | Y | 없음 | `>= slotUnitMinutes`, `slotUnitMinutes`의 배수 | OpenAI가 너무 긴 세션을 만들지 않도록 참고하는 가장 긴 연속 배치 가능 시간 |
 | `tasks` | array | Y | 없음 | 비어 있을 수 없음 | 분할 대상 태스크 목록 |
 | `tasks[].taskId` | integer | Y | 없음 | 중복 불가 | 입력 태스크 고유 ID |
 | `tasks[].title` | string | Y | 없음 | 공백 불가 | OpenAI가 의미를 파악하기 위한 태스크명. 응답에는 포함하지 않음 |
+| `tasks[].memo` | string 또는 null | N | `null` | 없음 | OpenAI가 세션 구조를 판단할 때 참고하는 태스크 상세 메모 |
 | `tasks[].taskType` | string | Y | 없음 | `TIME_BASED`, `SATISFACTION_BASED`, `QUANTITY_BASED` | RealPlan 태스크 유형 |
 | `tasks[].difficulty` | string | Y | 없음 | `HIGH`, `MEDIUM`, `LOW`, `UNKNOWN` | 태스크 난이도 |
 | `tasks[].remainingMin` | integer | Y | 없음 | `> 0` | 백엔드 `remainingMin`. 실제 수행 시간은 이미 차감된 남은 시간 |
@@ -1120,7 +1123,7 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
 |---|---|---:|---|
 | `taskSessions` | array | Y | 분할된 세션 목록 |
 | `taskSessions[].taskId` | integer | Y | 입력 `tasks[].taskId` 중 하나 |
-| `taskSessions[].sessionMinutes` | integer | Y | raw 세션 길이. 0보다 크며, 자동 배치 단계에서 30분 단위로 올림 |
+| `taskSessions[].sessionMinutes` | integer | Y | raw 세션 길이. 0보다 크며, 반드시 `slotUnitMinutes`의 배수일 필요는 없음 |
 | `taskSessions[].requiredFocusLevel` | string | Y | `HIGH`, `MEDIUM`, `LOW`, `FLEXIBLE` 중 하나 |
 
 #### 실패 `400 BAD_REQUEST`
@@ -1133,7 +1136,7 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
   "success": null,
   "error": {
     "code": "BAD_REQUEST",
-    "message": "slotUnitMinutes는 30이어야 합니다."
+    "message": "slotUnitMinutes는 0보다 커야 합니다."
   },
   "meta": {
     "timestamp": "2026-05-08T12:00:00",
@@ -1144,13 +1147,14 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
 
 ### 검증 규칙
 
-- `slotUnitMinutes`는 `30`이어야 합니다.
+- `slotUnitMinutes`는 0보다 커야 합니다.
 - `maxContinuousSchedulableMinutes`는 `slotUnitMinutes` 이상이며 `slotUnitMinutes`의 배수여야 합니다.
 - `tasks`는 비어 있을 수 없습니다.
 - `taskId`는 중복될 수 없습니다.
 - `title`은 공백일 수 없습니다.
 - Python은 `taskSchedulableRemainingMin = remainingMin - activeScheduledMin`로 태스크의 잔여 배치 가능 시간을 계산합니다.
-- `remainingMin - activeScheduledMin`는 0보다 커야 하며, 30분 단위 올림은 자동 배치 단계에서 수행합니다.
+- `remainingMin - activeScheduledMin`는 0보다 커야 합니다.
+- 세션 분할 결과인 `sessionMinutes`가 반드시 `slotUnitMinutes`의 배수일 필요는 없습니다.
 - 응답 검증 시 taskId 존재 여부, 세션 길이, focus level, taskId별 총합을 다시 확인합니다.
 
 ---
