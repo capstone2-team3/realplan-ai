@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
+TaskStatus = Literal["PENDING", "IN_PROGRESS"]
 TaskType = Literal["TIME_BASED", "QUANTITY_BASED", "SATISFACTION_BASED"]
 Difficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 TimeBand = Literal["06-12", "12-18", "18-24"]

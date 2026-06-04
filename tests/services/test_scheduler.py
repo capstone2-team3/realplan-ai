@@ -69,18 +69,6 @@ def test_remaining_zero_is_excluded_even_if_due_today():
     assert response.message == "추천할 미완료 태스크가 없어요."
 
 
-def test_completed_status_is_excluded():
-    response = _recommend(
-        [
-            _task(1, status="COMPLETED", remaining_minutes=60),
-            _task(2, status="PENDING", remaining_minutes=60),
-            _task(3, status="IN_PROGRESS", remaining_minutes=60),
-        ]
-    )
-
-    assert [item.taskId for item in response.recommendations] == [2, 3]
-
-
 def test_due_today_tasks_are_selected_before_general_tasks():
     response = _recommend(
         [

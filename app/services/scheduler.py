@@ -10,7 +10,7 @@ from app.services.focus_matching import calculate_focus_fit_score
 
 MAX_RECOMMENDATION_COUNT = 4
 NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."
-TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
+TaskStatus = Literal["PENDING", "IN_PROGRESS"]
 DEFAULT_TIME_BAND_FOCUS_SCORES = {
     "06-12": 85,
     "12-18": 65,
@@ -175,9 +175,6 @@ def importance_score(importance: str) -> int:
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
     """추천 대상이 아닌 태스크를 걸러내고 마감/중요도 기반 추천 점수를 만든다."""
 
-    if _is_excluded_status(task.status):
-        return None
-
     remaining_minutes = calculate_remaining_minutes(task)
     if remaining_minutes is None or remaining_minutes <= 0:
         return None
@@ -203,12 +200,6 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         deadline_label=_deadline_label(due_day, target_date),
         importance_label=_importance_label(task.importance),
     )
-
-
-def _is_excluded_status(status: str | None) -> bool:
-    """완료 상태는 추천 후보에서 제외한다."""
-
-    return status == "COMPLETED"
 
 
 def _candidate_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, int]:
