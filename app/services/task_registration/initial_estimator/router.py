@@ -43,8 +43,12 @@ class PlanningRouter:
         if completed < EARLY_THRESHOLD:
             rule_result = self.rule.estimate(req)
             average_result = self.average.estimate(req)
-            w_average = completed / EARLY_THRESHOLD
+
+            # 기존: w_average = completed / EARLY_THRESHOLD
+            # 실험: 완료 이력이 적어도 average baseline을 더 빠르게 반영한다.
+            w_average = completed / (completed + 3)
             w_rule = 1 - w_average
+
             blended_log = (
                 w_rule * rule_result.logCorrection
                 + w_average * average_result.logCorrection
