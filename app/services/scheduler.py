@@ -146,18 +146,20 @@ def deadline_score(due_date: date | datetime | None, target_date: date) -> int:
     if due_day is None:
         return 5
 
-    days_until_deadline = (due_day - target_date).days
-    if days_until_deadline <= 0:
+    days_left = (due_day - target_date).days
+    if days_left < 0:
+        return 20
+    if days_left == 0:
         return 100
-    if days_until_deadline == 1:
+    if days_left == 1:
         return 90
-    if days_until_deadline == 2:
+    if days_left == 2:
         return 80
-    if days_until_deadline == 3:
+    if days_left == 3:
         return 70
-    if days_until_deadline <= 7:
+    if days_left <= 7:
         return 50
-    if days_until_deadline <= 14:
+    if days_left <= 14:
         return 30
     return 10
 
@@ -180,7 +182,7 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         return None
 
     due_day = _to_date(task.dueDate)
-    is_due_today = due_day is not None and due_day <= target_date
+    is_due_today = due_day == target_date
     task_deadline_score = deadline_score(due_day, target_date)
     task_importance_score = importance_score(task.importance)
     # 추천 점수는 마감 압박을 더 크게 보고, 중요도는 보조 기준으로 반영한다.
@@ -340,10 +342,12 @@ def _deadline_label(due_date: date | None, target_date: date) -> str:
     if due_date is None:
         return "마감 없음"
 
-    days_until_deadline = (due_date - target_date).days
-    if days_until_deadline <= 0:
+    days_left = (due_date - target_date).days
+    if days_left < 0:
+        return f"D+{abs(days_left)}"
+    if days_left == 0:
         return "D-Day"
-    return f"D-{days_until_deadline}"
+    return f"D-{days_left}"
 
 
 def _importance_label(importance: str) -> str:

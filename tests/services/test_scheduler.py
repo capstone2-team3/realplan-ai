@@ -81,6 +81,23 @@ def test_due_today_tasks_are_selected_before_general_tasks():
     assert [item.taskId for item in response.recommendations] == [2, 1]
 
 
+def test_overdue_task_is_classified_as_general_task():
+    response = _recommend(
+        [
+            _task(1, due_date=date(2026, 5, 28), importance="high", remaining_minutes=60),
+            _task(2, due_date=TARGET_DATE, importance="low", remaining_minutes=60),
+        ]
+    )
+
+    overdue = next(item for item in response.recommendations if item.taskId == 1)
+    due_today = next(item for item in response.recommendations if item.taskId == 2)
+
+    assert overdue.isDueToday is False
+    assert overdue.deadlineScore == 20
+    assert overdue.deadlineLabel == "D+1"
+    assert due_today.isDueToday is True
+
+
 def test_final_display_order_uses_recommend_score_after_selection():
     response = _recommend(
         [
@@ -246,6 +263,7 @@ def test_importance_scores_are_calculated_case_insensitively():
 
 
 def test_deadline_score_policy():
+    assert deadline_score(date(2026, 5, 28), TARGET_DATE) == 20
     assert deadline_score(TARGET_DATE, TARGET_DATE) == 100
     assert deadline_score(date(2026, 5, 30), TARGET_DATE) == 90
     assert deadline_score(date(2026, 5, 31), TARGET_DATE) == 80
