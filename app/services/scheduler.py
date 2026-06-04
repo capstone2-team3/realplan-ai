@@ -11,7 +11,7 @@ from app.services.focus_matching import calculate_focus_fit_score
 MAX_RECOMMENDATION_COUNT = 4
 NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."
 TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
-TIME_BAND_FOCUS_SCORES = {
+DEFAULT_TIME_BAND_FOCUS_SCORES = {
     "06-12": 85,
     "12-18": 65,
     "18-24": 45,
@@ -46,6 +46,7 @@ class RecommendInput:
     targetDate: date
     availableMinutes: int
     tasks: list[CandidateTask]
+    timeBandFocusScores: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
     if available_minutes <= 0:
         raise ValueError("availableMinutes는 0보다 커야 합니다.")
 
+    time_band_focus_scores = resolve_time_band_focus_scores(inp.timeBandFocusScores)
     scored_tasks = [_score_task(task, inp.targetDate) for task in inp.tasks]
     candidates = [task for task in scored_tasks if task is not None]
 
@@ -116,7 +118,7 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
     selected.sort(key=_selected_sort_key)
     recommendations = [
-        _to_recommended_task(candidate, rank)
+        _to_recommended_task(candidate, rank, time_band_focus_scores)
         for rank, candidate in enumerate(selected, start=1)
     ]
 
@@ -237,9 +239,10 @@ def _selected_sort_key(candidate: _ScoredTask) -> tuple[float, bool, date, int, 
 def _to_recommended_task(
     candidate: _ScoredTask,
     rank: int,
+    time_band_focus_scores: dict[str, int],
 ) -> RecommendedTask:
     recommended_time_band, recommended_time_band_label, required_focus_level = (
-        recommend_time_band(candidate)
+        recommend_time_band(candidate, time_band_focus_scores)
     )
     return RecommendedTask(
         rank=rank,
@@ -276,7 +279,23 @@ def infer_required_focus_level(task: CandidateTask) -> str:
     return "FLEXIBLE"
 
 
-def recommend_time_band(candidate: _ScoredTask) -> tuple[str, str, str]:
+def resolve_time_band_focus_scores(
+    time_band_focus_scores: dict[str, int] | None,
+) -> dict[str, int]:
+    """사용자별 시간대 집중도 입력을 기본값 위에 덮어쓴다."""
+
+    resolved = dict(DEFAULT_TIME_BAND_FOCUS_SCORES)
+    for band, score in (time_band_focus_scores or {}).items():
+        if band not in resolved:
+            continue
+        resolved[band] = min(100, max(0, score))
+    return resolved
+
+
+def recommend_time_band(
+    candidate: _ScoredTask,
+    time_band_focus_scores: dict[str, int],
+) -> tuple[str, str, str]:
     """태스크 특성에 맞는 러프한 추천 수행 시간대를 계산한다."""
 
     required_focus_level = infer_required_focus_level(candidate.task)
@@ -286,7 +305,7 @@ def recommend_time_band(candidate: _ScoredTask) -> tuple[str, str, str]:
     best_band = "12-18"
     best_score: float | None = None
 
-    for band, focus_score in TIME_BAND_FOCUS_SCORES.items():
+    for band, focus_score in time_band_focus_scores.items():
         fit_score = calculate_focus_fit_score(
             avg_focus_score=focus_score,
             required_focus_level=required_focus_level,

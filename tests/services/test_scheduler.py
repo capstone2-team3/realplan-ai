@@ -38,12 +38,17 @@ def _task(
     )
 
 
-def _recommend(tasks: list[CandidateTask], available_minutes: int = 180):
+def _recommend(
+    tasks: list[CandidateTask],
+    available_minutes: int = 180,
+    time_band_focus_scores: dict[str, int] | None = None,
+):
     return recommend_tasks(
         RecommendInput(
             targetDate=TARGET_DATE,
             availableMinutes=available_minutes,
             tasks=tasks,
+            timeBandFocusScores=time_band_focus_scores,
         )
     )
 
@@ -157,6 +162,22 @@ def test_high_difficulty_recommends_morning_time_band():
     assert item.recommendedTimeBandLabel == "06-12시"
 
 
+def test_high_difficulty_uses_user_focus_scores_for_time_band():
+    response = _recommend(
+        [_task(1, difficulty="HIGH")],
+        time_band_focus_scores={
+            "06-12": 40,
+            "12-18": 55,
+            "18-24": 95,
+        },
+    )
+
+    item = response.recommendations[0]
+    assert item.requiredFocusLevel == "HIGH"
+    assert item.recommendedTimeBand == "18-24"
+    assert item.recommendedTimeBandLabel == "18-24시"
+
+
 def test_low_difficulty_recommends_evening_time_band():
     response = _recommend([_task(1, difficulty="LOW")])
 
@@ -164,6 +185,21 @@ def test_low_difficulty_recommends_evening_time_band():
     assert item.requiredFocusLevel == "LOW"
     assert item.recommendedTimeBand == "18-24"
     assert item.recommendedTimeBandLabel == "18-24시"
+
+
+def test_low_difficulty_uses_lowest_user_focus_score_for_time_band():
+    response = _recommend(
+        [_task(1, difficulty="LOW")],
+        time_band_focus_scores={
+            "06-12": 10,
+            "12-18": 80,
+            "18-24": 90,
+        },
+    )
+
+    item = response.recommendations[0]
+    assert item.requiredFocusLevel == "LOW"
+    assert item.recommendedTimeBand == "06-12"
 
 
 def test_medium_difficulty_with_high_importance_recommends_morning_time_band():
@@ -181,6 +217,19 @@ def test_unknown_difficulty_with_normal_importance_recommends_flexible_daytime_b
     assert item.requiredFocusLevel == "FLEXIBLE"
     assert item.recommendedTimeBand == "12-18"
     assert item.recommendedTimeBandLabel == "12-18시"
+
+
+def test_missing_time_band_focus_score_uses_default_fallback():
+    response = _recommend(
+        [_task(1, difficulty="HIGH")],
+        time_band_focus_scores={
+            "06-12": 10,
+        },
+    )
+
+    item = response.recommendations[0]
+    assert item.requiredFocusLevel == "HIGH"
+    assert item.recommendedTimeBand == "12-18"
 
 
 def test_urgent_medium_focus_task_gets_morning_bonus():

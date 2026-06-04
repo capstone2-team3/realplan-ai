@@ -89,13 +89,16 @@ def estimate(req: EstimateRequest, request: Request):
     "/tasks/recommend",
     response_model=ApiResponse[RecommendResponse],
     summary="특정 날짜의 태스크 추천도 계산",
-    description="요청으로 받은 후보 태스크와 가용 시간을 기준으로 특정 날짜의 추천도와 추천 작업량을 계산한다.",
+    description="요청으로 받은 후보 태스크와 사용자 시간대별 집중도를 기준으로 특정 날짜의 추천도와 추천 시간대를 계산한다.",
 )
 def recommend(req: RecommendRequest, request: Request):
     """DB 조회 없이 요청으로 받은 후보 목록만 기준으로 오늘 수행할 태스크를 추천한다."""
     inp = RecommendInput(
         targetDate=req.targetDate,
         availableMinutes=req.availableMinutes,
+        timeBandFocusScores={
+            item.timeBand: item.focusScore for item in req.timeBandFocusScores
+        },
         tasks=[
             CandidateTask(
                 taskId=task.taskId,

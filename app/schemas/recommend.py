@@ -10,6 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
 TaskType = Literal["TIME_BASED", "QUANTITY_BASED", "SATISFACTION_BASED"]
 Difficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+TimeBand = Literal["06-12", "12-18", "18-24"]
+
+
+class TimeBandFocusScoreDTO(BaseModel):
+    timeBand: TimeBand
+    focusScore: int = Field(..., ge=0, le=100)
 
 
 class RecommendCandidateDTO(BaseModel):
@@ -36,6 +42,7 @@ class RecommendRequest(BaseModel):
 
     targetDate: date
     availableMinutes: int = Field(..., gt=0, le=1260)
+    timeBandFocusScores: list[TimeBandFocusScoreDTO] = Field(default_factory=list)
     tasks: list[RecommendCandidateDTO] = Field(default_factory=list)
 
 
