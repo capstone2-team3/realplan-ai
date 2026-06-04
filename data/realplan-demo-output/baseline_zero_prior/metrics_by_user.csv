@@ -1,0 +1,3 @@
+﻿experiment,user_name,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+baseline_zero_prior,나영,5,5,-169.23,172.78,38.76,2.69,2.69,3.22,170.09,98.44,35.54
+baseline_zero_prior,세진,11,11,-139.95,141.02,39.63,-26.72,31.2,5.69,109.82,77.88,33.94
