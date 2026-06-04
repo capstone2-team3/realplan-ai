@@ -237,7 +237,7 @@ def test_missing_time_band_focus_score_uses_default_fallback():
     assert item.recommendedTimeBand == "12-18"
 
 
-def test_urgent_medium_focus_task_gets_morning_bonus():
+def test_urgent_medium_focus_task_uses_focus_fit_time_band():
     response = _recommend(
         [
             _task(

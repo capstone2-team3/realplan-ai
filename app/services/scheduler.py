@@ -316,9 +316,6 @@ def _time_band_urgency_bonus(candidate: _ScoredTask, band: str) -> float:
     if candidate.is_due_today:
         return {"06-12": 20.0, "12-18": 10.0, "18-24": 0.0}[band]
 
-    if candidate.deadline_score >= 70:
-        return {"06-12": 10.0, "12-18": 5.0, "18-24": 0.0}[band]
-
     return 0.0
 
 
