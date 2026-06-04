@@ -1,3 +1,0 @@
-﻿experiment,user_name,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
-exp03_router_personalization,나영,5,5,-81.97,107.79,39.07,3.12,3.12,2.41,104.67,97.11,36.66
-exp03_router_personalization,세진,11,11,-70.91,113.78,41.05,-20.24,25.84,4.11,87.94,77.29,36.94

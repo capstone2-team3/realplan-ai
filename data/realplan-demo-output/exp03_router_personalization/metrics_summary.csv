@@ -1,2 +1,0 @@
-﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
-exp03_router_personalization,16,16,-74.36,111.91,40.43,-12.94,18.74,3.58,93.17,83.25,36.85
