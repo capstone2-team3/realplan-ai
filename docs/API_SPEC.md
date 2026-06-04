@@ -1044,14 +1044,16 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
       "title": "자료구조 5장 문제풀이",
       "taskType": "QUANTITY_BASED",
       "difficulty": "HIGH",
-      "targetMinutes": 120
+      "remainingMin": 120,
+      "activeScheduledMin": 0
     },
     {
       "taskId": 203,
       "title": "캡스톤 발표자료 수정",
       "taskType": "SATISFACTION_BASED",
       "difficulty": "MEDIUM",
-      "targetMinutes": 60
+      "remainingMin": 90,
+      "activeScheduledMin": 30
     }
   ]
 }
@@ -1068,7 +1070,8 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
 | `tasks[].title` | string | Y | 없음 | 공백 불가 | OpenAI가 의미를 파악하기 위한 태스크명. 응답에는 포함하지 않음 |
 | `tasks[].taskType` | string | Y | 없음 | `TIME_BASED`, `SATISFACTION_BASED`, `QUANTITY_BASED` | RealPlan 태스크 유형 |
 | `tasks[].difficulty` | string | Y | 없음 | `HIGH`, `MEDIUM`, `LOW`, `UNKNOWN` | 태스크 난이도 |
-| `tasks[].targetMinutes` | integer | Y | 없음 | `> 0` | 해당 태스크가 분할되어야 하는 raw 총 시간 |
+| `tasks[].remainingMin` | integer | Y | 없음 | `> 0` | 백엔드 `remainingMin`. 실제 수행 시간은 이미 차감된 남은 시간 |
+| `tasks[].activeScheduledMin` | integer 또는 null | N | `0` | `>= 0` | 현재 유효하게 배치되어 있고 아직 실제 수행으로 반영되지 않은 시간 |
 
 ### Response Body
 
@@ -1093,7 +1096,7 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
         {
           "taskId": 101,
           "sessionMinutes": 30,
-          "requiredFocusLevel": "MEDIUM"
+          "requiredFocusLevel": "HIGH"
         },
         {
           "taskId": 203,
@@ -1146,7 +1149,8 @@ Spring 백엔드가 전달한 태스크 목록을 OpenAI API로 세션 단위로
 - `tasks`는 비어 있을 수 없습니다.
 - `taskId`는 중복될 수 없습니다.
 - `title`은 공백일 수 없습니다.
-- `targetMinutes`는 0보다 커야 하며, 30분 단위 올림은 자동 배치 단계에서 수행합니다.
+- Python은 `taskSchedulableRemainingMin = remainingMin - activeScheduledMin`로 태스크의 잔여 배치 가능 시간을 계산합니다.
+- `remainingMin - activeScheduledMin`는 0보다 커야 하며, 30분 단위 올림은 자동 배치 단계에서 수행합니다.
 - 응답 검증 시 taskId 존재 여부, 세션 길이, focus level, taskId별 총합을 다시 확인합니다.
 
 ---

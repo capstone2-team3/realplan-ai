@@ -12,7 +12,12 @@ class TaskDecompositionItem(BaseModel):
     title: str = Field(..., description="태스크명")
     taskType: TaskType = Field(..., description="태스크 유형")
     difficulty: TaskDifficulty = Field(..., description="태스크 난이도")
-    targetMinutes: int = Field(..., description="분할해야 하는 raw 총 시간")
+    remainingMin: int = Field(..., gt=0, description="백엔드 remainingMin")
+    activeScheduledMin: int | None = Field(
+        default=0,
+        ge=0,
+        description="현재 유효하게 배치되어 있고 아직 실제 수행으로 반영되지 않은 시간",
+    )
 
 
 class TaskDecompositionRequest(BaseModel):

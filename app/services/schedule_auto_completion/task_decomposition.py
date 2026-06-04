@@ -12,10 +12,12 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from app.schemas.decomposition import (
+    TaskDecompositionItem,
     TaskDecompositionRequest,
     TaskDecompositionResponse,
     TaskSession,
 )
+from app.services.shared.scheduling_time import calculate_schedulable_remaining_minutes
 
 load_dotenv()
 
@@ -161,16 +163,33 @@ class _OpenAITaskDecompositionResponse(BaseModel):
 def build_openai_messages(request: TaskDecompositionRequest) -> list[dict[str, str]]:
     """OpenAI에 전달할 system/user 메시지를 구성한다.
 
-    request body를 그대로 JSON으로 보내 Spring DTO와 Python 계산 입력의 의미가 어긋나지 않게 한다.
+    외부 요청은 remainingMin/activeScheduledMin을 받지만, LLM에는 계산된 targetMinutes를 전달한다.
     """
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": json.dumps(request.model_dump(), ensure_ascii=False),
+            "content": json.dumps(_openai_request_payload(request), ensure_ascii=False),
         },
     ]
+
+
+def _openai_request_payload(request: TaskDecompositionRequest) -> dict[str, Any]:
+    return {
+        "slotUnitMinutes": request.slotUnitMinutes,
+        "maxContinuousSchedulableMinutes": request.maxContinuousSchedulableMinutes,
+        "tasks": [
+            {
+                "taskId": task.taskId,
+                "title": task.title,
+                "taskType": task.taskType,
+                "difficulty": task.difficulty,
+                "targetMinutes": _target_minutes(task),
+            }
+            for task in request.tasks
+        ],
+    }
 
 
 def _is_openai_debug_enabled() -> bool:
@@ -283,8 +302,10 @@ def validate_request(request: TaskDecompositionRequest) -> None:
     for task in request.tasks:
         if not task.title.strip():
             raise ValueError(f"taskId={task.taskId}의 title은 비어 있을 수 없습니다.")
-        if task.targetMinutes <= 0:
-            raise ValueError(f"taskId={task.taskId}의 targetMinutes는 0보다 커야 합니다.")
+        if _target_minutes(task) <= 0:
+            raise ValueError(
+                f"taskId={task.taskId}의 remainingMin - activeScheduledMin은 0보다 커야 합니다."
+            )
 
 
 def validate_decomposition_response(
@@ -299,7 +320,7 @@ def validate_decomposition_response(
     if not response.taskSessions:
         raise ValueError("taskSessions는 비어 있을 수 없습니다.")
 
-    task_targets = {task.taskId: task.targetMinutes for task in request.tasks}
+    task_targets = {task.taskId: _target_minutes(task) for task in request.tasks}
     task_focus_levels = {
         task.taskId: DIFFICULTY_FOCUS_MAP[task.difficulty] for task in request.tasks
     }
@@ -385,7 +406,7 @@ def fallback_decompose(request: TaskDecompositionRequest) -> TaskDecompositionRe
     for task in request.tasks:
         focus_level = DIFFICULTY_FOCUS_MAP[task.difficulty]
         for minutes in _fallback_session_minutes(
-            target_minutes=task.targetMinutes,
+            target_minutes=_target_minutes(task),
             max_continuous_minutes=request.maxContinuousSchedulableMinutes,
         ):
             sessions.append(
@@ -417,3 +438,10 @@ async def decompose_tasks(request: TaskDecompositionRequest) -> TaskDecompositio
 
     logger.warning("OpenAI 태스크 분할 검증/호출 실패로 fallback 분할을 사용합니다.")
     return fallback_decompose(request)
+
+
+def _target_minutes(task: TaskDecompositionItem) -> int:
+    return calculate_schedulable_remaining_minutes(
+        remaining_min=task.remainingMin,
+        active_scheduled_min=task.activeScheduledMin,
+    )

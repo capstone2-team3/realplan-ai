@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -31,7 +32,7 @@ def _make_request(**overrides) -> TaskDecompositionRequest:
                 title="자료구조 5장 문제풀이",
                 taskType="QUANTITY_BASED",
                 difficulty="HIGH",
-                targetMinutes=120,
+                remainingMin=120,
             )
         ],
     )
@@ -51,14 +52,14 @@ def test_validate_request_rejects_duplicate_task_id():
                 title="A",
                 taskType="TIME_BASED",
                 difficulty="LOW",
-                targetMinutes=30,
+                remainingMin=30,
             ),
             dict(
                 taskId=1,
                 title="B",
                 taskType="SATISFACTION_BASED",
                 difficulty="MEDIUM",
-                targetMinutes=60,
+                remainingMin=60,
             ),
         ]
     )
@@ -67,7 +68,7 @@ def test_validate_request_rejects_duplicate_task_id():
         validate_request(req)
 
 
-def test_fallback_target_30_returns_single_session():
+def test_fallback_remaining_30_returns_single_session():
     req = _make_request(
         tasks=[
             dict(
@@ -75,7 +76,7 @@ def test_fallback_target_30_returns_single_session():
                 title="강의 듣기",
                 taskType="TIME_BASED",
                 difficulty="LOW",
-                targetMinutes=30,
+                remainingMin=30,
             )
         ]
     )
@@ -86,7 +87,7 @@ def test_fallback_target_30_returns_single_session():
     assert response.taskSessions[0].requiredFocusLevel == "LOW"
 
 
-def test_fallback_preserves_raw_target_minutes():
+def test_fallback_preserves_raw_remaining_minutes():
     req = _make_request(
         tasks=[
             dict(
@@ -94,7 +95,7 @@ def test_fallback_preserves_raw_target_minutes():
                 title="짧은 복습",
                 taskType="TIME_BASED",
                 difficulty="LOW",
-                targetMinutes=20,
+                remainingMin=20,
             )
         ]
     )
@@ -123,7 +124,7 @@ def test_fallback_uses_stable_60_minute_chunks(target_minutes, expected):
                 title="발표자료 수정",
                 taskType="SATISFACTION_BASED",
                 difficulty="MEDIUM",
-                targetMinutes=target_minutes,
+                remainingMin=target_minutes,
             )
         ]
     )
@@ -132,6 +133,66 @@ def test_fallback_uses_stable_60_minute_chunks(target_minutes, expected):
 
     assert _minutes(response) == expected
     validate_decomposition_response(req, response)
+
+
+def test_fallback_uses_schedulable_remaining_minutes():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=1,
+                title="발표자료 수정",
+                taskType="SATISFACTION_BASED",
+                difficulty="MEDIUM",
+                remainingMin=120,
+                activeScheduledMin=30,
+            )
+        ]
+    )
+
+    response = fallback_decompose(req)
+
+    assert _minutes(response) == [60, 30]
+    validate_decomposition_response(req, response)
+
+
+def test_validate_request_rejects_no_schedulable_remaining_minutes():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=1,
+                title="발표자료 수정",
+                taskType="SATISFACTION_BASED",
+                difficulty="MEDIUM",
+                remainingMin=30,
+                activeScheduledMin=30,
+            )
+        ]
+    )
+
+    with pytest.raises(ValueError, match="remainingMin - activeScheduledMin"):
+        validate_request(req)
+
+
+def test_openai_messages_use_derived_target_minutes():
+    req = _make_request(
+        tasks=[
+            dict(
+                taskId=1,
+                title="발표자료 수정",
+                taskType="SATISFACTION_BASED",
+                difficulty="MEDIUM",
+                remainingMin=120,
+                activeScheduledMin=30,
+            )
+        ]
+    )
+
+    messages = task_decomposition.build_openai_messages(req)
+    payload = json.loads(messages[1]["content"])
+
+    assert payload["tasks"][0]["targetMinutes"] == 90
+    assert "remainingMin" not in payload["tasks"][0]
+    assert "activeScheduledMin" not in payload["tasks"][0]
 
 
 def test_fallback_respects_30_minute_max_continuous():
@@ -143,7 +204,7 @@ def test_fallback_respects_30_minute_max_continuous():
                 title="단어 암기",
                 taskType="QUANTITY_BASED",
                 difficulty="UNKNOWN",
-                targetMinutes=90,
+                remainingMin=90,
             )
         ],
     )
@@ -195,14 +256,14 @@ def test_inject_required_focus_levels_from_task_difficulty():
                 title="강의 듣기",
                 taskType="TIME_BASED",
                 difficulty="LOW",
-                targetMinutes=30,
+                remainingMin=30,
             ),
             dict(
                 taskId=2,
                 title="알고리즘 문제풀이",
                 taskType="QUANTITY_BASED",
                 difficulty="HIGH",
-                targetMinutes=60,
+                remainingMin=60,
             ),
         ]
     )
@@ -230,7 +291,7 @@ def test_validate_response_rejects_non_inherited_focus_level():
                 title="자료구조 5장 문제풀이",
                 taskType="QUANTITY_BASED",
                 difficulty="HIGH",
-                targetMinutes=120,
+                remainingMin=120,
             )
         ]
     )
@@ -253,7 +314,7 @@ def test_fallback_inherits_unknown_difficulty_as_flexible():
                 title="범위 정리",
                 taskType="SATISFACTION_BASED",
                 difficulty="UNKNOWN",
-                targetMinutes=120,
+                remainingMin=120,
             )
         ]
     )

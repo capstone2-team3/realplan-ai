@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import Literal
 
 from app.services.shared.focus_matching import calculate_focus_fit_score
+from app.services.shared.scheduling_time import calculate_schedulable_remaining_minutes
 
 MAX_RECOMMENDATION_COUNT = 4
 NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."
@@ -133,9 +134,9 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 def calculate_remaining_minutes(task: CandidateTask) -> int | None:
     """백엔드 remainingMin에서 이미 유효하게 배치된 시간을 빼 태스크의 잔여 배치 가능 시간을 구한다."""
 
-    return (
-        task.remainingMin
-        - _none_to_zero(task.activeScheduledMin)
+    return calculate_schedulable_remaining_minutes(
+        remaining_min=task.remainingMin,
+        active_scheduled_min=task.activeScheduledMin,
     )
 
 
@@ -424,7 +425,3 @@ def _to_date(value: date | datetime | None) -> date | None:
     if isinstance(value, datetime):
         return value.date()
     return value
-
-
-def _none_to_zero(value: int | None) -> int:
-    return value if value is not None else 0
