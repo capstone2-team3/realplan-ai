@@ -253,7 +253,12 @@ def test_urgent_medium_focus_task_uses_focus_fit_time_band():
     assert item.deadlineScore == 80
     assert item.requiredFocusLevel == "MEDIUM"
     assert item.recommendedTimeBand == "06-12"
-    assert item.reason == "마감이 가까워 06-12시 시간대에 진행하기 좋아요."
+    assert item.reason == (
+        "마감이 가까워 미리 진행하는 것이 좋습니다. "
+        "중요도가 보통 수준으로 추천 점수에 반영되었습니다. "
+        "사용자의 해당 시간대 평균 집중도(85점)가 "
+        "태스크 요구 집중도와 잘 맞아 이 시간대를 추천했습니다."
+    )
 
 
 def test_importance_scores_are_calculated_case_insensitively():

@@ -251,7 +251,12 @@ def _to_recommended_task(
         recommendedTimeBand=recommended_time_band,
         recommendedTimeBandLabel=recommended_time_band_label,
         requiredFocusLevel=required_focus_level,
-        reason=_reason(candidate, recommended_time_band_label),
+        reason=_reason(
+            candidate,
+            recommended_time_band,
+            required_focus_level,
+            time_band_focus_scores,
+        ),
     )
 
 
@@ -319,20 +324,78 @@ def _time_band_urgency_bonus(candidate: _ScoredTask, band: str) -> float:
     return 0.0
 
 
-def _reason(candidate: _ScoredTask, recommended_time_band_label: str) -> str:
-    if candidate.is_due_today and candidate.importance_score >= 100:
-        return (
-            f"오늘 마감이고 중요도가 높아 "
-            f"{recommended_time_band_label} 시간대에 우선 진행하기 좋아요."
-        )
+def _reason(
+    candidate: _ScoredTask,
+    recommended_time_band: str,
+    required_focus_level: str,
+    time_band_focus_scores: dict[str, int],
+) -> str:
+    reasons = [
+        _deadline_reason(candidate),
+        _importance_reason(candidate),
+        _time_band_reason(candidate, recommended_time_band, time_band_focus_scores),
+        _remaining_time_reason(candidate),
+        _focus_reason(required_focus_level),
+    ]
+    selected_reasons = [reason for reason in reasons if reason]
+    return " ".join(selected_reasons[:3])
+
+
+def _deadline_reason(candidate: _ScoredTask) -> str | None:
+    if candidate.is_due_today:
+        return "오늘 마감 태스크라 우선 추천되었습니다."
+    if candidate.deadline_score >= 90:
+        return "마감이 매우 임박해 추천 우선순위가 높습니다."
     if candidate.deadline_score >= 70:
-        return f"마감이 가까워 {recommended_time_band_label} 시간대에 진행하기 좋아요."
+        return "마감이 가까워 미리 진행하는 것이 좋습니다."
+    if candidate.deadline_score >= 50:
+        return "일주일 이내 마감 예정이라 추천 후보에 포함되었습니다."
+    if candidate.deadline_score <= 10:
+        return "마감까지는 여유가 있지만 다른 조건을 함께 고려해 추천되었습니다."
+    return None
+
+
+def _importance_reason(candidate: _ScoredTask) -> str:
     if candidate.importance_score >= 100:
+        return "중요도가 높아 추천 점수에 크게 반영되었습니다."
+    if candidate.importance_score >= 60:
+        return "중요도가 보통 수준으로 추천 점수에 반영되었습니다."
+    return "중요도는 낮지만 마감일과 잔여 시간을 함께 고려해 추천되었습니다."
+
+
+def _remaining_time_reason(candidate: _ScoredTask) -> str:
+    if candidate.remaining_minutes <= 30:
+        return "남은 시간이 짧아 빠르게 완료하기 좋습니다."
+    if candidate.remaining_minutes <= 90:
+        return "남은 시간이 비교적 적어 오늘 일정에 포함하기 적합합니다."
+    return "남은 시간이 큰 태스크라 미리 나누어 진행하는 것이 좋습니다."
+
+
+def _focus_reason(required_focus_level: str) -> str:
+    if required_focus_level == "HIGH":
+        return "높은 집중도가 필요한 태스크로 판단되었습니다."
+    if required_focus_level == "MEDIUM":
+        return "중간 수준의 집중도가 필요한 태스크로 판단되었습니다."
+    if required_focus_level == "LOW":
+        return "낮은 집중도로도 수행 가능한 태스크로 판단되었습니다."
+    return "특정 집중도 요구가 크지 않은 유연한 태스크로 판단되었습니다."
+
+
+def _time_band_reason(
+    candidate: _ScoredTask,
+    recommended_time_band: str,
+    time_band_focus_scores: dict[str, int],
+) -> str:
+    if candidate.is_due_today and recommended_time_band == "06-12":
+        return "오늘 마감 태스크라 가능한 이른 시간대인 오전을 추천했습니다."
+
+    focus_score = time_band_focus_scores.get(recommended_time_band)
+    if focus_score is not None:
         return (
-            f"중요도가 높아 "
-            f"{recommended_time_band_label} 시간대에 집중해서 진행하기 좋아요."
+            f"사용자의 해당 시간대 평균 집중도({focus_score}점)가 "
+            "태스크 요구 집중도와 잘 맞아 이 시간대를 추천했습니다."
         )
-    return f"마감과 중요도를 고려해 {recommended_time_band_label} 시간대를 추천했어요."
+    return "태스크 특성과 기본 시간대 규칙을 기준으로 이 시간대를 추천했습니다."
 
 
 def _deadline_label(due_date: date | None, target_date: date) -> str:
