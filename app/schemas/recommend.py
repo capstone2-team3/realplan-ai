@@ -53,6 +53,7 @@ class RecommendedTaskDTO(BaseModel):
     remainingMin: int
     recommendScore: float
     deadlineScore: int
+    workloadUrgencyScore: int
     importanceScore: int
     isDueToday: bool
     deadlineLabel: str

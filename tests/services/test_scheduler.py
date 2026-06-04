@@ -8,6 +8,7 @@ from app.services.task_recommendation.scheduler import (
     deadline_score,
     importance_score,
     recommend_tasks,
+    workload_urgency_score,
 )
 
 
@@ -140,6 +141,7 @@ def test_null_due_date_uses_low_deadline_score():
 
     item = response.recommendations[0]
     assert item.deadlineScore == 5
+    assert item.workloadUrgencyScore == 10
     assert item.deadlineLabel == "마감 없음"
 
 
@@ -277,6 +279,30 @@ def test_deadline_score_policy():
     assert deadline_score(date(2026, 6, 12), TARGET_DATE) == 30
     assert deadline_score(date(2026, 6, 20), TARGET_DATE) == 10
     assert deadline_score(None, TARGET_DATE) == 5
+
+
+def test_workload_urgency_score_policy():
+    assert workload_urgency_score(60, None, TARGET_DATE) == 10
+    assert workload_urgency_score(60, date(2026, 5, 28), TARGET_DATE) == 100
+    assert workload_urgency_score(240, TARGET_DATE, TARGET_DATE) == 100
+    assert workload_urgency_score(180, TARGET_DATE, TARGET_DATE) == 85
+    assert workload_urgency_score(120, TARGET_DATE, TARGET_DATE) == 70
+    assert workload_urgency_score(60, TARGET_DATE, TARGET_DATE) == 50
+    assert workload_urgency_score(30, TARGET_DATE, TARGET_DATE) == 30
+    assert workload_urgency_score(29, TARGET_DATE, TARGET_DATE) == 15
+    assert workload_urgency_score(60, date(2026, 5, 30), TARGET_DATE) == 30
+
+
+def test_recommend_score_uses_workload_urgency_and_importance():
+    response = _recommend(
+        [_task(1, due_date=TARGET_DATE, importance="high", remaining_minutes=60)]
+    )
+
+    item = response.recommendations[0]
+    assert item.deadlineScore == 100
+    assert item.workloadUrgencyScore == 50
+    assert item.importanceScore == 100
+    assert item.recommendScore == 65.0
 
 
 def test_invalid_available_minutes_raises_value_error():

@@ -58,6 +58,7 @@ class RecommendedTask:
     remainingMin: int
     recommendScore: float
     deadlineScore: int
+    workloadUrgencyScore: int
     importanceScore: int
     isDueToday: bool
     deadlineLabel: str
@@ -85,6 +86,7 @@ class _ScoredTask:
     remaining_minutes: int
     recommend_score: float
     deadline_score: int
+    workload_urgency_score: int
     importance_score: int
     is_due_today: bool
     deadline_label: str
@@ -175,8 +177,39 @@ def importance_score(importance: str) -> int:
     }.get(importance.upper(), 40)
 
 
+def workload_urgency_score(
+    remaining_minutes: int,
+    due_date: date | datetime | None,
+    target_date: date,
+) -> int:
+    """마감까지 남은 일수 대비 잔여 소요 시간이 클수록 높은 점수를 부여한다."""
+
+    due_day = _to_date(due_date)
+    if due_day is None:
+        return 10
+
+    days_left = (due_day - target_date).days
+    if days_left < 0:
+        return 100
+
+    available_days = max(days_left + 1, 1)
+    daily_required_minutes = remaining_minutes / available_days
+
+    if daily_required_minutes >= 240:
+        return 100
+    if daily_required_minutes >= 180:
+        return 85
+    if daily_required_minutes >= 120:
+        return 70
+    if daily_required_minutes >= 60:
+        return 50
+    if daily_required_minutes >= 30:
+        return 30
+    return 15
+
+
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
-    """추천 대상이 아닌 태스크를 걸러내고 마감/중요도 기반 추천 점수를 만든다."""
+    """추천 대상이 아닌 태스크를 걸러내고 정책 점수 기반 추천 점수를 만든다."""
 
     remaining_minutes = calculate_remaining_minutes(task)
     if remaining_minutes is None or remaining_minutes <= 0:
@@ -185,10 +218,15 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
     due_day = _to_date(task.dueDate)
     is_due_today = due_day == target_date
     task_deadline_score = deadline_score(due_day, target_date)
+    task_workload_urgency_score = workload_urgency_score(
+        remaining_minutes,
+        due_day,
+        target_date,
+    )
     task_importance_score = importance_score(task.importance)
-    # 추천 점수는 마감 압박을 더 크게 보고, 중요도는 보조 기준으로 반영한다.
+    # 추천 점수는 잔여 작업 압박과 중요도를 반영한다.
     recommend_score = round(
-        0.6 * task_deadline_score + 0.4 * task_importance_score,
+        0.7 * task_workload_urgency_score + 0.3 * task_importance_score,
         1,
     )
 
@@ -198,6 +236,7 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         remaining_minutes=remaining_minutes,
         recommend_score=recommend_score,
         deadline_score=task_deadline_score,
+        workload_urgency_score=task_workload_urgency_score,
         importance_score=task_importance_score,
         is_due_today=is_due_today,
         deadline_label=_deadline_label(due_day, target_date),
@@ -245,6 +284,7 @@ def _to_recommended_task(
         remainingMin=candidate.remaining_minutes,
         recommendScore=candidate.recommend_score,
         deadlineScore=candidate.deadline_score,
+        workloadUrgencyScore=candidate.workload_urgency_score,
         importanceScore=candidate.importance_score,
         isDueToday=candidate.is_due_today,
         deadlineLabel=candidate.deadline_label,
