@@ -22,6 +22,11 @@ TIME_BAND_LABELS = {
     "12-18": "12-18시",
     "18-24": "18-24시",
 }
+TIME_BAND_END_HOURS = {
+    "06-12": 12,
+    "12-18": 18,
+    "18-24": 24,
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +50,7 @@ class CandidateTask:
 @dataclass(frozen=True)
 class RecommendInput:
     targetDate: date
+    requestedAt: datetime
     availableMinutes: int
     tasks: list[CandidateTask]
     timeBandFocusScores: dict[str, int] | None = None
@@ -104,6 +110,11 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
         raise ValueError("availableMinutes는 0보다 커야 합니다.")
 
     time_band_focus_scores = resolve_time_band_focus_scores(inp.timeBandFocusScores)
+    available_time_band_focus_scores = filter_available_time_bands(
+        time_band_focus_scores,
+        inp.targetDate,
+        inp.requestedAt,
+    )
     scored_tasks = [_score_task(task, inp.targetDate) for task in inp.tasks]
     candidates = [task for task in scored_tasks if task is not None]
 
@@ -121,7 +132,7 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
 
     selected.sort(key=_selected_sort_key)
     recommendations = [
-        _to_recommended_task(candidate, rank, time_band_focus_scores)
+        _to_recommended_task(candidate, rank, available_time_band_focus_scores)
         for rank, candidate in enumerate(selected, start=1)
     ]
 
@@ -331,6 +342,34 @@ def resolve_time_band_focus_scores(
     return resolved
 
 
+def filter_available_time_bands(
+    time_band_focus_scores: dict[str, int],
+    target_date: date,
+    requested_at: datetime,
+) -> dict[str, int]:
+    """요청 당일이면 이미 종료된 시간대를 추천 후보에서 제외한다."""
+
+    if target_date != requested_at.date():
+        return time_band_focus_scores
+
+    current_hour = requested_at.hour
+    filtered = {
+        band: score
+        for band, score in time_band_focus_scores.items()
+        if _time_band_end_hour(band) > current_hour
+    }
+
+    if filtered:
+        return filtered
+
+    return {
+        "18-24": time_band_focus_scores.get(
+            "18-24",
+            DEFAULT_TIME_BAND_FOCUS_SCORES["18-24"],
+        )
+    }
+
+
 def recommend_time_band(
     candidate: _ScoredTask,
     time_band_focus_scores: dict[str, int],
@@ -339,9 +378,12 @@ def recommend_time_band(
 
     required_focus_level = infer_required_focus_level(candidate.task)
     if required_focus_level == "FLEXIBLE":
-        return "12-18", "12-18시", required_focus_level
+        band = "12-18" if "12-18" in time_band_focus_scores else _latest_time_band(
+            time_band_focus_scores
+        )
+        return band, TIME_BAND_LABELS[band], required_focus_level
 
-    best_band = "12-18"
+    best_band = _latest_time_band(time_band_focus_scores)
     best_score: float | None = None
 
     for band, focus_score in time_band_focus_scores.items():
@@ -356,6 +398,17 @@ def recommend_time_band(
             best_band = band
 
     return best_band, TIME_BAND_LABELS[best_band], required_focus_level
+
+
+def _time_band_end_hour(band: str) -> int:
+    return TIME_BAND_END_HOURS[band]
+
+
+def _latest_time_band(time_band_focus_scores: dict[str, int]) -> str:
+    if not time_band_focus_scores:
+        return "18-24"
+
+    return max(time_band_focus_scores, key=_time_band_end_hour)
 
 
 def _time_band_urgency_bonus(candidate: _ScoredTask, band: str) -> float:

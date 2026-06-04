@@ -41,6 +41,7 @@ class RecommendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     targetDate: date
+    requestedAt: datetime
     availableMinutes: int = Field(..., gt=0, le=1260)
     timeBandFocusScores: list[TimeBandFocusScoreDTO] = Field(default_factory=list)
     tasks: list[RecommendCandidateDTO] = Field(default_factory=list)

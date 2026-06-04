@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -6,6 +6,7 @@ from app.services.task_recommendation.scheduler import (
     CandidateTask,
     RecommendInput,
     deadline_score,
+    filter_available_time_bands,
     importance_score,
     recommend_tasks,
     workload_urgency_score,
@@ -13,6 +14,7 @@ from app.services.task_recommendation.scheduler import (
 
 
 TARGET_DATE = date(2026, 5, 29)
+REQUESTED_AT = datetime(2026, 5, 29, 8, 0, 0)
 
 
 def _task(
@@ -43,10 +45,12 @@ def _recommend(
     tasks: list[CandidateTask],
     available_minutes: int = 180,
     time_band_focus_scores: dict[str, int] | None = None,
+    requested_at: datetime = REQUESTED_AT,
 ):
     return recommend_tasks(
         RecommendInput(
             targetDate=TARGET_DATE,
+            requestedAt=requested_at,
             availableMinutes=available_minutes,
             tasks=tasks,
             timeBandFocusScores=time_band_focus_scores,
@@ -183,6 +187,73 @@ def test_high_difficulty_uses_user_focus_scores_for_time_band():
     assert item.requiredFocusLevel == "HIGH"
     assert item.recommendedTimeBand == "18-24"
     assert item.recommendedTimeBandLabel == "18-24시"
+
+
+def test_same_day_request_excludes_already_finished_time_bands():
+    response = _recommend(
+        [_task(1, difficulty="HIGH")],
+        requested_at=datetime(2026, 5, 29, 14, 0, 0),
+        time_band_focus_scores={
+            "06-12": 100,
+            "12-18": 10,
+            "18-24": 95,
+        },
+    )
+
+    item = response.recommendations[0]
+    assert item.recommendedTimeBand == "18-24"
+    assert item.recommendedTimeBandLabel == "18-24시"
+
+
+def test_same_day_evening_request_keeps_only_latest_time_band():
+    response = _recommend(
+        [_task(1, difficulty="HIGH")],
+        requested_at=datetime(2026, 5, 29, 19, 0, 0),
+        time_band_focus_scores={
+            "06-12": 100,
+            "12-18": 100,
+            "18-24": 10,
+        },
+    )
+
+    item = response.recommendations[0]
+    assert item.recommendedTimeBand == "18-24"
+
+
+def test_future_target_date_uses_all_time_bands():
+    response = recommend_tasks(
+        RecommendInput(
+            targetDate=TARGET_DATE,
+            requestedAt=datetime(2026, 5, 28, 19, 0, 0),
+            availableMinutes=180,
+            tasks=[_task(1, difficulty="HIGH")],
+            timeBandFocusScores={
+                "06-12": 100,
+                "12-18": 10,
+                "18-24": 10,
+            },
+        )
+    )
+
+    item = response.recommendations[0]
+    assert item.recommendedTimeBand == "06-12"
+
+
+def test_filter_available_time_bands_falls_back_when_everything_is_filtered():
+    assert filter_available_time_bands({}, TARGET_DATE, REQUESTED_AT) == {
+        "18-24": 45
+    }
+
+
+def test_flexible_task_uses_available_time_band_after_filtering():
+    response = _recommend(
+        [_task(1, difficulty="UNKNOWN", importance="MEDIUM")],
+        requested_at=datetime(2026, 5, 29, 19, 0, 0),
+    )
+
+    item = response.recommendations[0]
+    assert item.requiredFocusLevel == "FLEXIBLE"
+    assert item.recommendedTimeBand == "18-24"
 
 
 def test_low_difficulty_recommends_evening_time_band():

@@ -95,6 +95,7 @@ def recommend(req: RecommendRequest, request: Request):
     """DB 조회 없이 요청으로 받은 후보 목록만 기준으로 오늘 수행할 태스크를 추천한다."""
     inp = RecommendInput(
         targetDate=req.targetDate,
+        requestedAt=req.requestedAt,
         availableMinutes=req.availableMinutes,
         timeBandFocusScores={
             item.timeBand: item.focusScore for item in req.timeBandFocusScores
