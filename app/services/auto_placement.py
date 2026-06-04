@@ -18,15 +18,11 @@ from app.schemas.schedules import (
     TimeBlock,
     UnscheduledSession,
 )
-
-
-FOCUS_LEVEL_PRIORITY = {
-    "HIGH": 3,
-    "MEDIUM": 2,
-    "LOW": 1,
-    "FLEXIBLE": 0,
-}
-ALLOWED_FOCUS_LEVELS = set(FOCUS_LEVEL_PRIORITY)
+from app.services.focus_matching import (
+    ALLOWED_FOCUS_LEVELS,
+    FOCUS_LEVEL_PRIORITY,
+    calculate_focus_fit_score,
+)
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 MAX_CONTINUOUS_SCHEDULABLE_MINUTES = 90
 MAX_SCHEDULE_MINUTES = 27 * 60
@@ -235,23 +231,6 @@ def _focus_score_for_slot(
         if start <= slot_start_minutes < end:
             return focus_score
     return 50
-
-
-def calculate_focus_fit_score(avg_focus_score: float, required_focus_level: str) -> float:
-    """요구 집중도와 슬롯 집중도 간 적합도를 계산한다.
-
-    HIGH는 높은 집중도 슬롯을 선호하고, LOW는 가벼운 작업을 낮은 집중도 구간에 배치하려고 반대로 본다.
-    """
-
-    if required_focus_level == "HIGH":
-        return avg_focus_score
-    if required_focus_level == "MEDIUM":
-        return avg_focus_score if avg_focus_score >= 60 else avg_focus_score - 20
-    if required_focus_level == "LOW":
-        return 100 - avg_focus_score
-    if required_focus_level == "FLEXIBLE":
-        return 50
-    raise ValueError(f"허용되지 않은 requiredFocusLevel입니다: {required_focus_level}")
 
 
 def sort_task_sessions(

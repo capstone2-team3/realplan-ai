@@ -102,6 +102,8 @@ def recommend(req: RecommendRequest, request: Request):
                 name=task.name,
                 dueDate=task.dueDate,
                 importance=task.importance,
+                taskType=task.taskType,
+                difficulty=task.difficulty,
                 status=task.status,
                 remainingMin=task.remainingMin,
                 activeScheduledMin=task.activeScheduledMin,
@@ -119,21 +121,21 @@ def recommend(req: RecommendRequest, request: Request):
         data=RecommendResponse(
             targetDate=result.targetDate,
             availableMinutes=result.availableMinutes,
-            totalRecommendedMinutes=result.totalRecommendedMinutes,
             recommendations=[
                 RecommendedTaskDTO(
                     rank=item.rank,
                     taskId=item.taskId,
                     name=item.name,
                     remainingMin=item.remainingMin,
-                    recommendedMinutes=item.recommendedMinutes,
                     recommendScore=item.recommendScore,
                     deadlineScore=item.deadlineScore,
                     importanceScore=item.importanceScore,
                     isDueToday=item.isDueToday,
                     deadlineLabel=item.deadlineLabel,
                     importanceLabel=item.importanceLabel,
-                    tags=item.tags,
+                    recommendedTimeBand=item.recommendedTimeBand,
+                    recommendedTimeBandLabel=item.recommendedTimeBandLabel,
+                    requiredFocusLevel=item.requiredFocusLevel,
                     reason=item.reason,
                 )
                 for item in result.recommendations

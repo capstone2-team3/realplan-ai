@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
+TaskType = Literal["TIME_BASED", "QUANTITY_BASED", "SATISFACTION_BASED"]
+Difficulty = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 
 
 class RecommendCandidateDTO(BaseModel):
@@ -22,6 +24,8 @@ class RecommendCandidateDTO(BaseModel):
     name: str
     dueDate: date | datetime | None = None
     importance: str | None = None
+    taskType: TaskType | None = None
+    difficulty: Difficulty | None = None
     status: TaskStatus
     remainingMin: int = Field(..., gt=0)
     activeScheduledMin: int | None = Field(default=0, ge=0)
@@ -40,20 +44,20 @@ class RecommendedTaskDTO(BaseModel):
     taskId: int
     name: str
     remainingMin: int
-    recommendedMinutes: int
     recommendScore: float
     deadlineScore: int
     importanceScore: int
     isDueToday: bool
     deadlineLabel: str
     importanceLabel: str
-    tags: list[str]
+    recommendedTimeBand: str
+    recommendedTimeBandLabel: str
+    requiredFocusLevel: str
     reason: str
 
 
 class RecommendResponse(BaseModel):
     targetDate: date
     availableMinutes: int
-    totalRecommendedMinutes: int
     recommendations: list[RecommendedTaskDTO]
     message: str | None = None

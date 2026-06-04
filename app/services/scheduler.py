@@ -6,10 +6,21 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal
 
+from app.services.focus_matching import calculate_focus_fit_score
 
 MAX_RECOMMENDATION_COUNT = 4
 NO_RECOMMENDATION_MESSAGE = "추천할 미완료 태스크가 없어요."
 TaskStatus = Literal["COMPLETED", "PENDING", "IN_PROGRESS"]
+TIME_BAND_FOCUS_SCORES = {
+    "06-12": 85,
+    "12-18": 65,
+    "18-24": 45,
+}
+TIME_BAND_LABELS = {
+    "06-12": "06-12시",
+    "12-18": "12-18시",
+    "18-24": "18-24시",
+}
 
 
 @dataclass(frozen=True)
@@ -25,6 +36,8 @@ class CandidateTask:
     remainingMin: int
     dueDate: date | datetime | None = None
     importance: str | None = None
+    taskType: str | None = None
+    difficulty: str | None = None
     activeScheduledMin: int | None = None
 
 
@@ -41,14 +54,15 @@ class RecommendedTask:
     taskId: int
     name: str
     remainingMin: int
-    recommendedMinutes: int
     recommendScore: float
     deadlineScore: int
     importanceScore: int
     isDueToday: bool
     deadlineLabel: str
     importanceLabel: str
-    tags: list[str]
+    recommendedTimeBand: str
+    recommendedTimeBandLabel: str
+    requiredFocusLevel: str
     reason: str
 
 
@@ -56,7 +70,6 @@ class RecommendedTask:
 class RecommendOutput:
     targetDate: date
     availableMinutes: int
-    totalRecommendedMinutes: int
     recommendations: list[RecommendedTask]
     message: str | None = None
 
@@ -79,7 +92,7 @@ class _ScoredTask:
 def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
     """미완료 태스크 중 targetDate에 수행할 태스크를 최대 4개 추천한다.
 
-    오늘 마감 태스크를 먼저 채우고, 남은 시간에 일반 태스크를 점수 순으로 배정한다.
+    오늘 마감 태스크와 일반 태스크를 분리한 뒤 점수 순으로 추천한다.
     """
 
     available_minutes = inp.availableMinutes
@@ -95,34 +108,21 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
     due_today.sort(key=_candidate_sort_key)
     general.sort(key=_candidate_sort_key)
 
-    selected: list[tuple[_ScoredTask, int]] = []
-    remaining_available_minutes = available_minutes
+    selected: list[_ScoredTask] = []
+    for candidate in due_today + general:
+        if len(selected) >= MAX_RECOMMENDATION_COUNT:
+            break
+        selected.append(candidate)
 
-    for candidate_group in (due_today, general):
-        for candidate in candidate_group:
-            if len(selected) >= MAX_RECOMMENDATION_COUNT or remaining_available_minutes <= 0:
-                break
-
-            recommended_minutes = min(
-                candidate.remaining_minutes,
-                remaining_available_minutes,
-            )
-            if recommended_minutes <= 0:
-                continue
-
-            selected.append((candidate, recommended_minutes))
-            remaining_available_minutes -= recommended_minutes
-
-    selected.sort(key=lambda item: _selected_sort_key(item[0]))
+    selected.sort(key=_selected_sort_key)
     recommendations = [
-        _to_recommended_task(candidate, recommended_minutes, rank)
-        for rank, (candidate, recommended_minutes) in enumerate(selected, start=1)
+        _to_recommended_task(candidate, rank)
+        for rank, candidate in enumerate(selected, start=1)
     ]
 
     return RecommendOutput(
         targetDate=inp.targetDate,
         availableMinutes=available_minutes,
-        totalRecommendedMinutes=sum(item.recommendedMinutes for item in recommendations),
         recommendations=recommendations,
         message=NO_RECOMMENDATION_MESSAGE if not recommendations else None,
     )
@@ -236,52 +236,94 @@ def _selected_sort_key(candidate: _ScoredTask) -> tuple[float, bool, date, int, 
 
 def _to_recommended_task(
     candidate: _ScoredTask,
-    recommended_minutes: int,
     rank: int,
 ) -> RecommendedTask:
-    tags = _tags(candidate, recommended_minutes)
+    recommended_time_band, recommended_time_band_label, required_focus_level = (
+        recommend_time_band(candidate)
+    )
     return RecommendedTask(
         rank=rank,
         taskId=candidate.task.taskId,
         name=candidate.task.name,
         remainingMin=candidate.remaining_minutes,
-        recommendedMinutes=recommended_minutes,
         recommendScore=candidate.recommend_score,
         deadlineScore=candidate.deadline_score,
         importanceScore=candidate.importance_score,
         isDueToday=candidate.is_due_today,
         deadlineLabel=candidate.deadline_label,
         importanceLabel=candidate.importance_label,
-        tags=tags,
-        reason=_reason(candidate, recommended_minutes),
+        recommendedTimeBand=recommended_time_band,
+        recommendedTimeBandLabel=recommended_time_band_label,
+        requiredFocusLevel=required_focus_level,
+        reason=_reason(candidate, recommended_time_band_label),
     )
 
 
-def _tags(candidate: _ScoredTask, recommended_minutes: int) -> list[str]:
-    tags: list[str] = []
+def infer_required_focus_level(task: CandidateTask) -> str:
+    """태스크 난이도와 중요도로 추천 시간대용 요구 집중도를 추정한다."""
 
+    difficulty = (task.difficulty or "UNKNOWN").upper()
+    importance = (task.importance or "").upper()
+
+    if difficulty == "HIGH":
+        return "HIGH"
+    if difficulty == "MEDIUM":
+        return "HIGH" if importance == "HIGH" else "MEDIUM"
+    if difficulty == "LOW":
+        return "LOW"
+    if importance == "HIGH":
+        return "MEDIUM"
+    return "FLEXIBLE"
+
+
+def recommend_time_band(candidate: _ScoredTask) -> tuple[str, str, str]:
+    """태스크 특성에 맞는 러프한 추천 수행 시간대를 계산한다."""
+
+    required_focus_level = infer_required_focus_level(candidate.task)
+    if required_focus_level == "FLEXIBLE":
+        return "12-18", "12-18시", required_focus_level
+
+    best_band = "12-18"
+    best_score: float | None = None
+
+    for band, focus_score in TIME_BAND_FOCUS_SCORES.items():
+        fit_score = calculate_focus_fit_score(
+            avg_focus_score=focus_score,
+            required_focus_level=required_focus_level,
+        )
+        score = fit_score + _time_band_urgency_bonus(candidate, band)
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_band = band
+
+    return best_band, TIME_BAND_LABELS[best_band], required_focus_level
+
+
+def _time_band_urgency_bonus(candidate: _ScoredTask, band: str) -> float:
     if candidate.is_due_today:
-        tags.append("오늘 마감")
-    elif candidate.due_date is not None and candidate.deadline_score >= 70:
-        tags.append("마감 임박")
+        return {"06-12": 20.0, "12-18": 10.0, "18-24": 0.0}[band]
 
-    if candidate.importance_score >= 100:
-        tags.append("중요도 높음")
-    if recommended_minutes < candidate.remaining_minutes:
-        tags.append("일부 진행 추천")
-    return tags
-
-
-def _reason(candidate: _ScoredTask, recommended_minutes: int) -> str:
-    if recommended_minutes < candidate.remaining_minutes:
-        return "남은 시간이 길어 오늘은 일부 진행으로 추천했어요."
-    if candidate.is_due_today and candidate.importance_score >= 100:
-        return "오늘 마감이고 중요도가 높아 추천했어요."
     if candidate.deadline_score >= 70:
-        return "마감이 가까워 우선 추천했어요."
+        return {"06-12": 10.0, "12-18": 5.0, "18-24": 0.0}[band]
+
+    return 0.0
+
+
+def _reason(candidate: _ScoredTask, recommended_time_band_label: str) -> str:
+    if candidate.is_due_today and candidate.importance_score >= 100:
+        return (
+            f"오늘 마감이고 중요도가 높아 "
+            f"{recommended_time_band_label} 시간대에 우선 진행하기 좋아요."
+        )
+    if candidate.deadline_score >= 70:
+        return f"마감이 가까워 {recommended_time_band_label} 시간대에 진행하기 좋아요."
     if candidate.importance_score >= 100:
-        return "중요도가 높고 아직 남은 시간이 있어 추천했어요."
-    return "오늘 가능한 시간 안에서 진행하기 좋아 추천했어요."
+        return (
+            f"중요도가 높아 "
+            f"{recommended_time_band_label} 시간대에 집중해서 진행하기 좋아요."
+        )
+    return f"마감과 중요도를 고려해 {recommended_time_band_label} 시간대를 추천했어요."
 
 
 def _deadline_label(due_date: date | None, target_date: date) -> str:

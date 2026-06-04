@@ -16,12 +16,12 @@ from app.schemas.schedules import (
 from app.services.auto_placement import (
     auto_place_sessions,
     build_slots,
-    calculate_focus_fit_score,
     merge_adjacent_blocks,
     minutes_to_time,
     time_to_minutes,
     validate_auto_placement_request,
 )
+from app.services.focus_matching import calculate_focus_fit_score
 
 
 def _task(
