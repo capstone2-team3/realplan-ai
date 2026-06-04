@@ -117,6 +117,7 @@ def test_invalid_task_status_is_rejected():
                 {
                     "taskId": 1,
                     "name": "task",
+                    "importance": "MEDIUM",
                     "status": "TODO",
                     "remainingMin": 60,
                 }

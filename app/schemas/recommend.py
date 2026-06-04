@@ -29,7 +29,7 @@ class RecommendCandidateDTO(BaseModel):
     taskId: int
     name: str
     dueDate: date | datetime | None = None
-    importance: str | None = None
+    importance: str
     taskType: TaskType | None = None
     difficulty: Difficulty | None = None
     status: TaskStatus

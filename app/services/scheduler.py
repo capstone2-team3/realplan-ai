@@ -34,8 +34,8 @@ class CandidateTask:
     name: str
     status: TaskStatus
     remainingMin: int
+    importance: str
     dueDate: date | datetime | None = None
-    importance: str | None = None
     taskType: str | None = None
     difficulty: str | None = None
     activeScheduledMin: int | None = None
@@ -162,14 +162,14 @@ def deadline_score(due_date: date | datetime | None, target_date: date) -> int:
     return 10
 
 
-def importance_score(importance: str | None) -> int:
+def importance_score(importance: str) -> int:
     """백엔드 중요도 문자열을 추천 계산용 점수로 변환한다."""
 
     return {
         "HIGH": 100,
         "MEDIUM": 60,
         "LOW": 30,
-    }.get((importance or "").upper(), 40)
+    }.get(importance.upper(), 40)
 
 
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
@@ -266,7 +266,7 @@ def infer_required_focus_level(task: CandidateTask) -> str:
     """태스크 난이도와 중요도로 추천 시간대용 요구 집중도를 추정한다."""
 
     difficulty = (task.difficulty or "UNKNOWN").upper()
-    importance = (task.importance or "").upper()
+    importance = task.importance.upper()
 
     if difficulty == "HIGH":
         return "HIGH"
@@ -355,12 +355,12 @@ def _deadline_label(due_date: date | None, target_date: date) -> str:
     return f"D-{days_until_deadline}"
 
 
-def _importance_label(importance: str | None) -> str:
+def _importance_label(importance: str) -> str:
     return {
         "HIGH": "중요도 높음",
         "MEDIUM": "중요도 보통",
         "LOW": "중요도 낮음",
-    }.get((importance or "").upper(), "중요도 미정")
+    }.get(importance.upper(), "중요도 보통")
 
 
 def _to_date(value: date | datetime | None) -> date | None:

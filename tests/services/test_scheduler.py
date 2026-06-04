@@ -18,7 +18,7 @@ def _task(
     task_id: int,
     *,
     due_date: date | None = None,
-    importance: str | None = "medium",
+    importance: str = "medium",
     task_type: str | None = None,
     difficulty: str | None = None,
     status: str = "PENDING",
@@ -255,7 +255,6 @@ def test_importance_scores_are_calculated_case_insensitively():
     assert importance_score("HIGH") == 100
     assert importance_score("medium") == 60
     assert importance_score("Low") == 30
-    assert importance_score(None) == 40
 
 
 def test_deadline_score_policy():
