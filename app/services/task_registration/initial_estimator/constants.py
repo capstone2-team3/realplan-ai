@@ -5,10 +5,10 @@ from __future__ import annotations
 import math
 
 # EMA 학습률
-ETA_GLOBAL = 0.10
-ETA_TYPE = 0.15
-ETA_DIFFICULTY = 0.10
-ETA_FOLDER = 0.10
+ETA_GLOBAL = 0.20
+ETA_TYPE = 0.20
+ETA_DIFFICULTY = 0.15
+ETA_FOLDER = 0.15
 
 # Shrinkage 강도
 TYPE_SHRINKAGE_N = 10          # r_type = typeCount / (typeCount + 10)

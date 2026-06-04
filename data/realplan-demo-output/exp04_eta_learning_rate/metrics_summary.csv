@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+exp04_eta_learning_rate,16,16,-75.23,111.73,39.93,-12.96,18.72,3.56,93.01,83.25,36.37
