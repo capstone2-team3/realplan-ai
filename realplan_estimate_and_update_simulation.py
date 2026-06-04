@@ -56,17 +56,17 @@ except ModuleNotFoundError as exc:
 #    실제 DB 값이 있으면 이 값만 바꾸면 된다.
 # -----------------------------------------------------------------------------
 
-SYSTEM_GLOBAL_PRIOR = 0.0
+SYSTEM_GLOBAL_PRIOR = math.log(1.56)  # 약 0.4447
 SYSTEM_TYPE_EFFECT = {
     "TIME_BASED": 0.0,
-    "QUANTITY_BASED": 0.0,
-    "SATISFACTION_BASED": 0.0,
+    "QUANTITY_BASED": -0.071,
+    "SATISFACTION_BASED": 0.262,
 }
 SYSTEM_DIFFICULTY_EFFECT = {
-    "LOW": 0.0,
-    "MEDIUM": 0.0,
-    "HIGH": 0.0,
-    "UNKNOWN": 0.0,
+    "LOW": -0.050,
+    "MEDIUM": -0.022,
+    "HIGH": -0.031,
+    "UNKNOWN": 0.204,
 }
 
 
