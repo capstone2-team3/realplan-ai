@@ -80,9 +80,10 @@ Hard constraints:
 - Every input task must have at least one output session.
 - Each output session must reference a valid input taskId.
 - sessionMinutes must be a positive integer.
+- sessionMinutes must be a multiple of slotUnitMinutes.
 - sessionMinutes must be less than or equal to maxContinuousSchedulableMinutes.
 - For each task, the sum of sessionMinutes must equal that task's targetMinutes exactly.
-- sessionMinutes does not have to be a multiple of slotUnitMinutes.
+- targetMinutes is already rounded up to the nearest multiple of slotUnitMinutes.
 - Do not create dates, start times, end times, titles, explanations, or requiredFocusLevel.
 - Return only the JSON object that matches the schema.
 
@@ -93,9 +94,9 @@ Before returning the JSON, verify internally:
 1. Every taskId exists in the input.
 2. Every input task has at least one output session.
 3. Every sessionMinutes is a positive integer.
-4. Every sessionMinutes is less than or equal to maxContinuousSchedulableMinutes.
-5. For each task, the sum of sessionMinutes equals targetMinutes exactly.
-6. sessionMinutes is not required to be a multiple of slotUnitMinutes.
+4. Every sessionMinutes is a multiple of slotUnitMinutes.
+5. Every sessionMinutes is less than or equal to maxContinuousSchedulableMinutes.
+6. For each task, the sum of sessionMinutes equals targetMinutes exactly.
 7. No requiredFocusLevel is included.
 8. No start time, end time, date, schedule position, session title, or explanation is included.
 9. No extra text is included outside the JSON.
@@ -163,15 +164,14 @@ def _openai_request_payload(request: TaskDecompositionRequest) -> dict[str, Any]
         "fieldDescriptions": {
             "slotUnitMinutes": (
                 "The scheduling slot unit used later by the auto-placement step. "
-                "It is provided for context only. Do not force sessionMinutes to be "
-                "a multiple of slotUnitMinutes."
+                "Every sessionMinutes must be a multiple of this value."
             ),
             "maxContinuousSchedulableMinutes": (
                 "The maximum allowed length of a single continuous session. "
                 "No session may exceed this value."
             ),
             "targetMinutes": (
-                "The exact amount of time that must be decomposed for this task. "
+                "The slot-rounded amount of time that must be decomposed for this task. "
                 "For each task, the sum of all generated sessionMinutes must equal "
                 "targetMinutes exactly."
             ),
@@ -185,7 +185,7 @@ def _openai_request_payload(request: TaskDecompositionRequest) -> dict[str, Any]
                 "memo": task.memo,
                 "taskType": task.taskType,
                 "difficulty": task.difficulty,
-                "targetMinutes": _target_minutes(task),
+                "targetMinutes": _rounded_target_minutes(task, request.slotUnitMinutes),
             }
             for task in request.tasks
         ],
@@ -320,7 +320,10 @@ def validate_decomposition_response(
     if not response.taskSessions:
         raise ValueError("taskSessions는 비어 있을 수 없습니다.")
 
-    task_targets = {task.taskId: _target_minutes(task) for task in request.tasks}
+    task_targets = {
+        task.taskId: _rounded_target_minutes(task, request.slotUnitMinutes)
+        for task in request.tasks
+    }
     task_focus_levels = {
         task.taskId: DIFFICULTY_FOCUS_MAP[task.difficulty] for task in request.tasks
     }
@@ -332,6 +335,11 @@ def validate_decomposition_response(
             raise ValueError(f"입력에 없는 taskId입니다: {session.taskId}")
         if session.sessionMinutes <= 0:
             raise ValueError(f"sessionMinutes는 0보다 커야 합니다: {session.sessionMinutes}")
+        if session.sessionMinutes % request.slotUnitMinutes != 0:
+            raise ValueError(
+                "sessionMinutes는 slotUnitMinutes의 배수여야 합니다: "
+                f"{session.sessionMinutes}"
+            )
         if session.sessionMinutes > request.maxContinuousSchedulableMinutes:
             raise ValueError(
                 "sessionMinutes가 maxContinuousSchedulableMinutes를 초과했습니다: "
@@ -354,7 +362,7 @@ def validate_decomposition_response(
     for task_id, target_minutes in task_targets.items():
         if sums[task_id] != target_minutes:
             raise ValueError(
-                f"taskId={task_id}의 세션 합계가 targetMinutes와 다릅니다: "
+                f"taskId={task_id}의 세션 합계가 슬롯 단위 targetMinutes와 다릅니다: "
                 f"{sums[task_id]} != {target_minutes}"
             )
 
@@ -396,7 +404,7 @@ def fallback_decompose(request: TaskDecompositionRequest) -> TaskDecompositionRe
     for task in request.tasks:
         focus_level = DIFFICULTY_FOCUS_MAP[task.difficulty]
         for minutes in _fallback_session_minutes(
-            target_minutes=_target_minutes(task),
+            target_minutes=_rounded_target_minutes(task, request.slotUnitMinutes),
             slot_unit_minutes=request.slotUnitMinutes,
             max_continuous_minutes=request.maxContinuousSchedulableMinutes,
         ):
@@ -436,3 +444,11 @@ def _target_minutes(task: TaskDecompositionItem) -> int:
         remaining_min=task.remainingMin,
         active_scheduled_min=task.activeScheduledMin,
     )
+
+
+def _rounded_target_minutes(
+    task: TaskDecompositionItem,
+    slot_unit_minutes: int,
+) -> int:
+    target_minutes = _target_minutes(task)
+    return ((target_minutes + slot_unit_minutes - 1) // slot_unit_minutes) * slot_unit_minutes

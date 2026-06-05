@@ -149,6 +149,63 @@ def test_auto_place_rounds_raw_session_minutes_up_to_slot_unit():
     assert response.summary.unscheduledMinutes == 0
 
 
+def test_auto_place_rounds_task_total_once_for_split_sessions_with_slot_indexes():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(slotIndexes=[6, 7, 8, 9]),
+            dict(slotIndexes=[14, 15]),
+        ],
+        focusTimeSlots=[],
+        tasks=[
+            _task(21, 128, is_due_today=True, recommend_score=100),
+        ],
+        taskSessions=[
+            _session(21, 64, daily_plan_session_id=46),
+            _session(21, 64, daily_plan_session_id=47),
+        ],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.model_dump()["scheduleBlocks"] == [
+        {
+            "dailyPlanSessionId": 46,
+            "taskId": 21,
+            "slotIndexes": [6, 7, 8],
+        },
+        {
+            "dailyPlanSessionId": 47,
+            "taskId": 21,
+            "slotIndexes": [14, 15],
+        },
+    ]
+    assert response.summary.scheduledMinutes == 150
+    assert response.summary.unscheduledMinutes == 0
+
+
+def test_auto_place_accepts_slot_rounded_sessions_with_raw_task_target():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(slotIndexes=[6, 7, 8, 9]),
+            dict(slotIndexes=[14, 15]),
+        ],
+        focusTimeSlots=[],
+        tasks=[
+            _task(21, 128, is_due_today=True, recommend_score=100),
+        ],
+        taskSessions=[
+            _session(21, 90, daily_plan_session_id=46),
+            _session(21, 60, daily_plan_session_id=47),
+        ],
+    )
+
+    validate_auto_placement_request(req)
+    response = auto_place_sessions(req)
+
+    assert response.summary.scheduledMinutes == 150
+    assert response.summary.unscheduledMinutes == 0
+
+
 def test_session_falls_back_to_atomic_chunks_when_continuous_position_is_missing():
     req = _request(
         schedulableTimeBlocks=[
