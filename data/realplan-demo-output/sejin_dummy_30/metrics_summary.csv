@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+sejin_dummy_30,30,30,-31.51,65.37,25.99,3.27,3.27,1.51,62.1,95.0,24.48
