@@ -26,13 +26,9 @@ from app.services.task_registration.classifier.types import (
 
 
 def _build_user_prompt(inp: ClassifyInput) -> str:
-    """태스크 이름과 선택 메모만 넣어 분류에 필요한 최소 컨텍스트를 만든다."""
+    """태스크 이름만 넣어 분류에 필요한 최소 컨텍스트를 만든다."""
 
-    parts = [f"태스크 이름: {inp.name}"]
-    if inp.memo:
-        parts.append(f"메모: {inp.memo}")
-    parts.append("\n위 태스크를 분류하세요.")
-    return "\n".join(parts)
+    return f"태스크 이름: {inp.name}\n\n위 태스크를 분류하세요."
 
 
 def _build_messages(inp: ClassifyInput) -> list[dict]:

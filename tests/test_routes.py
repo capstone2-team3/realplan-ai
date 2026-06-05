@@ -119,6 +119,22 @@ def test_unknown_request_fields_are_rejected():
     assert "systemPriorityEffect" in body["error"]["message"]
 
 
+def test_classify_rejects_memo_field():
+    response = client.post(
+        "/tasks/classify",
+        json={
+            "name": "운영체제 Chap.3 정리",
+            "memo": "개념 정리",
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 422
+    _assert_common_response(body, "FAIL", "/tasks/classify")
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "memo" in body["error"]["message"]
+
+
 def test_calculation_error_uses_common_format():
     response = client.post(
         "/tasks/estimate",
