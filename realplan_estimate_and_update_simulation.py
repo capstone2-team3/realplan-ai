@@ -2,20 +2,21 @@
 RealPlan 원본 서비스 코드 호출 기반 시뮬레이션 드라이버
 
 목적
-- 태스크 등록 시: app.services.task_registration.initial_estimator.estimation.estimate_initial_duration 호출
-- 세션 종료 시: app.services.session_progress.remaining_estimator.estimate_remaining 호출
-- 태스크 완료 시: app.services.profile_calibration.updater.update_coefficients 호출
-- 실험별 예측 정확도 지표를 콘솔/CSV/그래프 PNG로 출력
+- 태스크 등록 시: estimate_initial_duration 호출
+- 세션 종료 시: estimate_remaining 호출
+- 태스크 완료 시: update_coefficients 호출
+- CSV 기반으로 초기 예측 / 잔여시간 재예측 / 보정값 업데이트를 순차 실행
+- 최종 user_ai_* 보정값을 seed SQL에 반영할 수 있도록 출력
 
 실행 위치
-- realplan-ai 프로젝트 루트에서 실행하는 것을 권장한다.
-- 프로젝트 루트란 `app/` 디렉터리가 바로 보이는 위치다.
+- realplan-ai 프로젝트 루트에서 실행
+- 즉, app/ 디렉터리가 바로 보이는 위치
 
 예시 실행
     uv run python realplan_estimate_and_update_simulation.py \
         --data-dir ./data/realplan-demo \
-        --output-dir ./data/realplan-demo-output/baseline \
-        --experiment-name baseline
+        --output-dir ./data/realplan-demo-output/sejin \
+        --experiment-name sejin_dummy_30
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
 
 # -----------------------------------------------------------------------------
 # 1. 프로젝트 원본 코드 import
@@ -53,15 +55,16 @@ except ModuleNotFoundError as exc:
 
 # -----------------------------------------------------------------------------
 # 2. 시스템 prior/effect 설정
-#    실제 DB 값이 있으면 이 값만 바꾸면 된다.
 # -----------------------------------------------------------------------------
 
 SYSTEM_GLOBAL_PRIOR = math.log(1.56)  # 약 0.4447
+
 SYSTEM_TYPE_EFFECT = {
     "TIME_BASED": 0.0,
     "QUANTITY_BASED": -0.071,
     "SATISFACTION_BASED": 0.262,
 }
+
 SYSTEM_DIFFICULTY_EFFECT = {
     "LOW": -0.050,
     "MEDIUM": -0.022,
@@ -71,13 +74,16 @@ SYSTEM_DIFFICULTY_EFFECT = {
 
 
 # -----------------------------------------------------------------------------
-# 3. 원본 CSV 값 -> API 입력 enum 문자열 매핑
+# 3. CSV 값 -> API enum / DB ID 매핑
 # -----------------------------------------------------------------------------
 
 TASK_TYPE_MAP = {
     "시간형": "TIME_BASED",
     "분량형": "QUANTITY_BASED",
     "만족형": "SATISFACTION_BASED",
+    "TIME_BASED": "TIME_BASED",
+    "QUANTITY_BASED": "QUANTITY_BASED",
+    "SATISFACTION_BASED": "SATISFACTION_BASED",
 }
 
 DIFFICULTY_MAP = {
@@ -85,6 +91,10 @@ DIFFICULTY_MAP = {
     "중": "MEDIUM",
     "상": "HIGH",
     "모름": "UNKNOWN",
+    "LOW": "LOW",
+    "MEDIUM": "MEDIUM",
+    "HIGH": "HIGH",
+    "UNKNOWN": "UNKNOWN",
 }
 
 FOCUS_MAP = {
@@ -92,14 +102,33 @@ FOCUS_MAP = {
     "보통": "MEDIUM",
     "꽤 집중": "HIGH",
     "완전 몰입": "VERY_HIGH",
+    "LOW": "LOW",
+    "MEDIUM": "MEDIUM",
+    "HIGH": "HIGH",
+    "VERY_HIGH": "VERY_HIGH",
+}
+
+# user_id = 1 기준 seed에서 사용할 폴더 ID 가정
+# 실제 DB에서 폴더 id가 다르면 이 값만 수정하면 됨.
+FOLDER_ID_MAP = {
+    "기본 폴더": "1",
+    "테스트 폴더": "2",
+    "알고리즘": "3",
+    "캡스톤": "4",
+    "보안": "5",
+    "운영체제": "6",
+    "멀코컴": "7",
 }
 
 Row = dict[str, Any]
+
 
 TASK_RESULT_FIELDS = [
     "user_name",
     "task_id",
     "title",
+    "folder_raw",
+    "folder_id",
     "task_type_raw",
     "task_type",
     "difficulty_raw",
@@ -164,8 +193,6 @@ PROFILE_RESULT_FIELDS = [
     "folder_count",
 ]
 
-# 초기 예측값과 세션 종료 시점별 재예측값을 한 행씩 누적해,
-# 실제 소요시간 대비 오차 변화를 태스크별로 한눈에 확인하기 위한 출력 컬럼.
 PREDICTION_TIMELINE_RESULT_FIELDS = [
     "user_name",
     "task_id",
@@ -197,27 +224,13 @@ METRICS_SUMMARY_FIELDS = [
     "mape_improvement_points",
 ]
 
-METRICS_BY_USER_FIELDS = [
-    "experiment",
-    "user_name",
-    "task_count_initial",
-    "task_count_last",
-    "initial_bias",
-    "initial_mae",
-    "initial_mape",
-    "last_bias",
-    "last_mae",
-    "last_mape",
-    "mae_improvement_minutes",
-    "mae_improvement_percent",
-    "mape_improvement_points",
-]
 
+# -----------------------------------------------------------------------------
+# 4. in-memory 사용자 보정값 상태
+# -----------------------------------------------------------------------------
 
 @dataclass
 class UserProfile:
-    """시뮬레이션 중 DB의 사용자 보정값 역할을 하는 in-memory 상태."""
-
     completed_count: int = 0
     user_global: float | None = None
     user_type_residual: dict[str, float] = field(default_factory=dict)
@@ -267,7 +280,6 @@ class UserProfile:
         )
 
     def apply_update_response(self, response: Any) -> None:
-        """원본 update_coefficients 응답을 다음 태스크의 입력 profile로 반영한다."""
         if getattr(response, "dropped", False):
             self.completed_count += 1
             return
@@ -283,26 +295,8 @@ class UserProfile:
 
 
 # -----------------------------------------------------------------------------
-# 4. CSV 로딩/정규화
+# 5. CSV 로딩/정규화
 # -----------------------------------------------------------------------------
-
-def read_realplan_csv(path: Path) -> list[Row]:
-    """현재 수집 CSV는 0행 설명/공백, 1행 컬럼명 형태라 header=1로 읽는다."""
-    with path.open(newline="", encoding="utf-8-sig") as file:
-        reader = csv.reader(file)
-        next(reader, None)
-        headers = [col.strip() for col in next(reader, [])]
-        rows: list[Row] = []
-        for values in reader:
-            row = {
-                header: values[index].strip() if index < len(values) else ""
-                for index, header in enumerate(headers)
-                if header
-            }
-            if any(clean_text(value) for value in row.values()):
-                rows.append(row)
-    return rows
-
 
 def clean_text(value: Any) -> str:
     if value is None:
@@ -322,45 +316,108 @@ def to_float(value: Any) -> float | None:
         return None
 
 
+def read_realplan_csv(path: Path) -> list[Row]:
+    """
+    기존 원본 CSV는 0행 설명 / 1행 컬럼명 구조였고,
+    새로 만든 더미 CSV는 0행부터 컬럼명일 수도 있으므로 둘 다 지원한다.
+    """
+    with path.open(newline="", encoding="utf-8-sig") as file:
+        all_rows = list(csv.reader(file))
+
+    if not all_rows:
+        return []
+
+    first_row = [col.strip() for col in all_rows[0]]
+    second_row = [col.strip() for col in all_rows[1]] if len(all_rows) > 1 else []
+
+    known_headers = {"태스크 ID", "태스크 이름", "세션 번호", "진행률(%)"}
+
+    if any(col in known_headers for col in first_row):
+        headers = first_row
+        data_rows = all_rows[1:]
+    elif any(col in known_headers for col in second_row):
+        headers = second_row
+        data_rows = all_rows[2:]
+    else:
+        raise ValueError(f"CSV 헤더를 찾지 못했습니다: {path}")
+
+    rows: list[Row] = []
+    for values in data_rows:
+        row = {
+            header: values[index].strip() if index < len(values) else ""
+            for index, header in enumerate(headers)
+            if header
+        }
+        if any(clean_text(value) for value in row.values()):
+            rows.append(row)
+
+    return rows
+
+
+def pick_first(row: Row, names: list[str]) -> str:
+    for name in names:
+        value = clean_text(row.get(name))
+        if value:
+            return value
+    return ""
+
+
 def normalize_tasks(raw_rows: list[Row], user_id: int, user_name: str) -> list[Row]:
     rows: list[Row] = []
 
     for row in raw_rows:
-        if clean_text(row.get("완료 여부")) != "O":
+        completed = pick_first(row, ["완료 여부", "status", "상태"])
+        if completed and completed not in {"O", "COMPLETED", "완료"}:
             continue
 
-        estimated = to_float(row.get("본인 예상 소요시간(분)"))
-        actual = to_float(row.get("실제 소요 시간(분) 계산"))
-        if estimated is None or estimated <= 0 or actual is None or actual <= 0:
+        estimated = to_float(
+            pick_first(row, ["본인 예상 소요시간(분)", "estimated_minutes", "user_estimated"])
+        )
+        actual = to_float(
+            pick_first(row, ["실제 소요 시간(분) 계산", "actual_minutes", "total_time"])
+        )
+
+        if estimated is None or estimated <= 0:
+            continue
+        if actual is None or actual <= 0:
             continue
 
-        task_id = to_float(row.get("태스크 ID"))
-        if task_id is None:
+        task_id_value = to_float(pick_first(row, ["태스크 ID", "task_id", "id"]))
+        if task_id_value is None:
             continue
 
-        task_type_raw = clean_text(row.get("태스크 유형"))
-        difficulty_raw = clean_text(row.get("난이도")) or "중"
+        task_type_raw = pick_first(row, ["태스크 유형", "task_type", "type"])
+        difficulty_raw = pick_first(row, ["난이도", "difficulty"]) or "중"
+        folder_raw = pick_first(row, ["폴더", "folder", "folder_name"]) or "기본 폴더"
+
+        task_type = TASK_TYPE_MAP.get(task_type_raw, task_type_raw)
+        difficulty = DIFFICULTY_MAP.get(difficulty_raw, "MEDIUM")
+        folder_id = FOLDER_ID_MAP.get(folder_raw)
+
+        if folder_id is None:
+            raise ValueError(
+                f"알 수 없는 폴더명입니다. FOLDER_ID_MAP에 추가하세요: {folder_raw}"
+            )
 
         rows.append(
             {
                 "user_id": user_id,
                 "user_name": user_name,
-                "task_id": int(task_id),
-                "title": clean_text(row.get("태스크 이름")),
+                "task_id": int(task_id_value),
+                "title": pick_first(row, ["태스크 이름", "title", "task_title"]),
+                "folder_raw": folder_raw,
+                "folder_id": folder_id,
                 "task_type_raw": task_type_raw,
-                "task_type": TASK_TYPE_MAP.get(task_type_raw, task_type_raw),
+                "task_type": task_type,
                 "difficulty_raw": difficulty_raw,
-                "difficulty": DIFFICULTY_MAP.get(difficulty_raw, "MEDIUM"),
-                "importance_raw": clean_text(row.get("우선순위")) or "보통",
+                "difficulty": difficulty,
+                "importance_raw": pick_first(row, ["우선순위", "importance"]) or "보통",
                 "estimated_minutes": estimated,
                 "actual_minutes": actual,
-                # 현재 CSV에는 folder 정보가 없으므로 None.
-                # 나중에 폴더 열이 생기면 이 값만 채우면 원본 residual 로직이 그대로 반영된다.
-                "folder_id": None,
             }
         )
 
-    return sorted(rows, key=lambda row: row["task_id"])
+    return sorted(rows, key=lambda item: item["task_id"])
 
 
 def normalize_sessions(
@@ -372,7 +429,7 @@ def normalize_sessions(
     rows: list[Row] = []
 
     for row in raw_rows:
-        task_id_value = to_float(row.get("태스크 ID"))
+        task_id_value = to_float(pick_first(row, ["태스크 ID", "task_id"]))
         if task_id_value is None:
             continue
 
@@ -380,9 +437,11 @@ def normalize_sessions(
         if task_id not in allowed_task_ids:
             continue
 
-        elapsed = to_float(row.get("세션 소요 시간(분) 계산"))
-        progress_percent = to_float(row.get("진행률(%)"))
-        focus_raw = clean_text(row.get("집중도"))
+        elapsed = to_float(
+            pick_first(row, ["세션 소요 시간(분) 계산", "session_elapsed_minutes", "actual_minutes"])
+        )
+        progress_percent = to_float(pick_first(row, ["진행률(%)", "progress_percent"]))
+        focus_raw = pick_first(row, ["집중도", "focus_raw", "focus_level"])
         focus_level = FOCUS_MAP.get(focus_raw)
 
         if elapsed is None or elapsed <= 0:
@@ -390,14 +449,18 @@ def normalize_sessions(
         if progress_percent is None or progress_percent <= 0:
             continue
         if focus_level is None:
-            continue
+            raise ValueError(f"알 수 없는 집중도입니다: {focus_raw}")
+
+        session_order = to_float(pick_first(row, ["세션 번호", "session_order"]))
+        if session_order is None:
+            session_order = 0
 
         rows.append(
             {
                 "user_id": user_id,
                 "user_name": user_name,
                 "task_id": task_id,
-                "session_order": int(to_float(row.get("세션 번호")) or 0),
+                "session_order": int(session_order),
                 "elapsed_minutes": elapsed,
                 "progress_percent": progress_percent,
                 "progress": min(progress_percent / 100.0, 1.0),
@@ -406,19 +469,26 @@ def normalize_sessions(
             }
         )
 
-    return sorted(rows, key=lambda row: (row["task_id"], row["session_order"]))
+    return sorted(rows, key=lambda item: (item["task_id"], item["session_order"]))
 
 
 # -----------------------------------------------------------------------------
-# 5. 출력 유틸
+# 6. 출력 유틸
 # -----------------------------------------------------------------------------
 
 def safe_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def write_csv(path: Path, rows: list[Row], fieldnames: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8-sig") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def print_table(rows: list[Row], columns: list[str]) -> None:
-    """지정한 컬럼만 간단한 고정폭 표로 출력한다."""
     if not rows:
         return
 
@@ -426,29 +496,24 @@ def print_table(rows: list[Row], columns: list[str]) -> None:
         column: max(len(column), *(len(str(row.get(column, ""))) for row in rows))
         for column in columns
     }
+
     header = " | ".join(column.ljust(widths[column]) for column in columns)
     separator = "-+-".join("-" * widths[column] for column in columns)
+
     print(header)
     print(separator)
+
     for row in rows:
         print(" | ".join(str(row.get(column, "")).ljust(widths[column]) for column in columns))
 
 
-def write_csv(path: Path, rows: list[Row], fieldnames: list[str]) -> None:
-    """엑셀에서 한글이 깨지지 않도록 utf-8-sig로 CSV를 저장한다."""
-    with path.open("w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-
-
 def prediction_error_fields(predicted_total: float, actual_minutes: float) -> dict[str, float]:
-    """예측 총 소요시간과 실제 소요시간의 차이를 보고서/엑셀용 컬럼으로 만든다."""
     error = predicted_total - actual_minutes
     absolute_error = abs(error)
     absolute_percentage_error = (
         absolute_error / actual_minutes * 100.0 if actual_minutes > 0 else 0.0
     )
+
     return {
         "error_minutes_predicted_minus_actual": round(error, 2),
         "error_minutes_updated_total_minus_actual": round(error, 2),
@@ -458,7 +523,7 @@ def prediction_error_fields(predicted_total: float, actual_minutes: float) -> di
 
 
 # -----------------------------------------------------------------------------
-# 6. 원본 서비스 호출 기반 시뮬레이션
+# 7. 시뮬레이션
 # -----------------------------------------------------------------------------
 
 def simulate_user(
@@ -477,6 +542,7 @@ def simulate_user(
     )
 
     profile = UserProfile()
+
     task_rows: list[Row] = []
     session_rows: list[Row] = []
     profile_rows: list[Row] = []
@@ -487,9 +553,10 @@ def simulate_user(
         completed_before = profile.completed_count
         user_global_before = profile.user_global
 
-        # 1) 태스크 등록 시 초기 소요 시간 예측: 원본 서비스 호출
+        # 1. 태스크 등록 시 초기 소요 시간 예측
         estimate_req = profile.estimate_request(task)
         estimate_res = estimate_initial_duration(estimate_req)
+
         initial_ai_total = float(estimate_res.aiEstimatedMinutes)
         actual_minutes = float(task["actual_minutes"])
 
@@ -509,12 +576,14 @@ def simulate_user(
             }
         )
 
-        # 2) 세션 종료 시 잔여 시간 예측: 원본 서비스 호출
+        # 2. 세션 종료 시 잔여 시간 재예측
         previous_ai_total = initial_ai_total
         task_sessions = [session for session in sessions if session["task_id"] == task_id]
         cumulative_elapsed = 0.0
+
         for session in task_sessions:
             cumulative_elapsed += float(session["elapsed_minutes"])
+
             remaining_req = SessionRemainingRequest(
                 elapsedMinutes=cumulative_elapsed,
                 progress=float(session["progress"]),
@@ -552,7 +621,9 @@ def simulate_user(
                         float(remaining_res.normalizedRemainingMinutes), 2
                     ),
                     "blending_weight": round(float(remaining_res.blendingWeight), 4),
-                    "final_remaining_minutes": round(float(remaining_res.finalRemainingMinutes), 2),
+                    "final_remaining_minutes": round(
+                        float(remaining_res.finalRemainingMinutes), 2
+                    ),
                     "focus_weight": float(remaining_res.focusWeight),
                 }
             )
@@ -572,9 +643,10 @@ def simulate_user(
                     **error_fields,
                 }
             )
+
             previous_ai_total = updated_ai_total
 
-        # 3) 태스크 완료 시 사용자 보정값 업데이트: 원본 서비스 호출
+        # 3. 태스크 완료 시 사용자 보정값 업데이트
         update_req = profile.update_request(task)
         update_res = update_coefficients(update_req)
 
@@ -583,6 +655,8 @@ def simulate_user(
                 "user_name": user_name,
                 "task_id": task_id,
                 "title": task["title"],
+                "folder_raw": task["folder_raw"],
+                "folder_id": task["folder_id"],
                 "task_type_raw": task["task_type_raw"],
                 "task_type": task["task_type"],
                 "difficulty_raw": task["difficulty_raw"],
@@ -591,14 +665,20 @@ def simulate_user(
                 "ai_estimated_minutes_at_registration": round(
                     float(estimate_res.aiEstimatedMinutes), 2
                 ),
-                "correction_factor_at_registration": round(float(estimate_res.correctionFactor), 4),
-                "log_correction_at_registration": round(float(estimate_res.logCorrection), 4),
+                "correction_factor_at_registration": round(
+                    float(estimate_res.correctionFactor), 4
+                ),
+                "log_correction_at_registration": round(
+                    float(estimate_res.logCorrection), 4
+                ),
                 "estimate_stage": estimate_res.stage,
                 "actual_minutes": round(float(task["actual_minutes"]), 2),
                 "planning_error_ratio_actual_div_user_estimated": round(
                     float(update_res.planningErrorRatio), 4
                 ),
-                "clamped_planning_error_ratio": round(float(update_res.clampedPlanningErrorRatio), 4),
+                "clamped_planning_error_ratio": round(
+                    float(update_res.clampedPlanningErrorRatio), 4
+                ),
                 "log_ratio": round(float(update_res.logRatio), 4),
                 "clamped_log_ratio": round(float(update_res.clampedLogRatio), 4),
                 "update_stage": update_res.stage,
@@ -619,6 +699,7 @@ def simulate_user(
         )
 
         profile.apply_update_response(update_res)
+
         profile_rows.append(
             {
                 "user_name": user_name,
@@ -626,7 +707,7 @@ def simulate_user(
                 "completed_count": profile.completed_count,
                 "user_global": None
                 if profile.user_global is None
-                else round(float(profile.user_global), 4),
+                else round(float(profile.user_global), 6),
                 "user_type_residual": safe_json(profile.user_type_residual),
                 "user_difficulty_residual": safe_json(profile.user_difficulty_residual),
                 "user_folder_residual": safe_json(profile.user_folder_residual),
@@ -640,7 +721,7 @@ def simulate_user(
 
 
 # -----------------------------------------------------------------------------
-# 7. 비교 지표 계산/출력/그래프
+# 8. 지표 계산
 # -----------------------------------------------------------------------------
 
 def _mean(values: list[float]) -> float:
@@ -653,7 +734,10 @@ def _metric_from_rows(rows: list[Row]) -> dict[str, float | int]:
 
     errors = [float(row["error_minutes_predicted_minus_actual"]) for row in rows]
     absolute_errors = [float(row["absolute_error_minutes"]) for row in rows]
-    absolute_percentage_errors = [float(row["absolute_percentage_error"]) for row in rows]
+    absolute_percentage_errors = [
+        float(row["absolute_percentage_error"]) for row in rows
+    ]
+
     return {
         "count": len(rows),
         "bias": round(_mean(errors), 2),
@@ -663,52 +747,21 @@ def _metric_from_rows(rows: list[Row]) -> dict[str, float | int]:
 
 
 def _last_session_rows(timeline_rows: list[Row]) -> list[Row]:
-    last_by_task: dict[tuple[str, int], Row] = {}
+    last_by_task: dict[int, Row] = {}
+
     for row in timeline_rows:
         if row.get("prediction_step") != "SESSION_REESTIMATE":
             continue
-        key = (str(row["user_name"]), int(row["task_id"]))
+
+        task_id = int(row["task_id"])
         current_order = int(row.get("session_order") or 0)
-        previous = last_by_task.get(key)
+        previous = last_by_task.get(task_id)
         previous_order = int(previous.get("session_order") or 0) if previous else -1
+
         if previous is None or current_order >= previous_order:
-            last_by_task[key] = row
+            last_by_task[task_id] = row
+
     return list(last_by_task.values())
-
-
-def _summary_row(
-    *,
-    experiment_name: str,
-    initial_rows: list[Row],
-    last_rows: list[Row],
-    user_name: str | None = None,
-) -> Row:
-    initial = _metric_from_rows(initial_rows)
-    last = _metric_from_rows(last_rows)
-
-    mae_improvement = float(initial["mae"]) - float(last["mae"])
-    mae_improvement_percent = (
-        mae_improvement / float(initial["mae"]) * 100.0 if float(initial["mae"]) > 0 else 0.0
-    )
-    mape_improvement_points = float(initial["mape"]) - float(last["mape"])
-
-    row: Row = {
-        "experiment": experiment_name,
-        "task_count_initial": initial["count"],
-        "task_count_last": last["count"],
-        "initial_bias": initial["bias"],
-        "initial_mae": initial["mae"],
-        "initial_mape": initial["mape"],
-        "last_bias": last["bias"],
-        "last_mae": last["mae"],
-        "last_mape": last["mape"],
-        "mae_improvement_minutes": round(mae_improvement, 2),
-        "mae_improvement_percent": round(mae_improvement_percent, 2),
-        "mape_improvement_points": round(mape_improvement_points, 2),
-    }
-    if user_name is not None:
-        row["user_name"] = user_name
-    return row
 
 
 def compute_and_save_metrics(
@@ -716,237 +769,213 @@ def compute_and_save_metrics(
     timeline_rows: list[Row],
     output_dir: Path,
     experiment_name: str,
-) -> tuple[list[Row], list[Row]]:
-    """baseline/실험 비교용 지표를 콘솔 출력, CSV 저장, PNG 그래프 저장한다."""
+) -> list[Row]:
     initial_rows = [
         row for row in timeline_rows if row.get("prediction_step") == "INITIAL_ESTIMATE"
     ]
     last_rows = _last_session_rows(timeline_rows)
 
-    summary_rows = [
-        _summary_row(
-            experiment_name=experiment_name,
-            initial_rows=initial_rows,
-            last_rows=last_rows,
-        )
+    initial = _metric_from_rows(initial_rows)
+    last = _metric_from_rows(last_rows)
+
+    mae_improvement = float(initial["mae"]) - float(last["mae"])
+    mae_improvement_percent = (
+        mae_improvement / float(initial["mae"]) * 100.0
+        if float(initial["mae"]) > 0
+        else 0.0
+    )
+    mape_improvement_points = float(initial["mape"]) - float(last["mape"])
+
+    rows = [
+        {
+            "experiment": experiment_name,
+            "task_count_initial": initial["count"],
+            "task_count_last": last["count"],
+            "initial_bias": initial["bias"],
+            "initial_mae": initial["mae"],
+            "initial_mape": initial["mape"],
+            "last_bias": last["bias"],
+            "last_mae": last["mae"],
+            "last_mape": last["mape"],
+            "mae_improvement_minutes": round(mae_improvement, 2),
+            "mae_improvement_percent": round(mae_improvement_percent, 2),
+            "mape_improvement_points": round(mape_improvement_points, 2),
+        }
     ]
 
-    user_names = sorted({str(row["user_name"]) for row in timeline_rows})
-    by_user_rows: list[Row] = []
-    for user_name in user_names:
-        user_initial_rows = [row for row in initial_rows if row["user_name"] == user_name]
-        user_last_rows = [row for row in last_rows if row["user_name"] == user_name]
-        by_user_rows.append(
-            _summary_row(
-                experiment_name=experiment_name,
-                user_name=user_name,
-                initial_rows=user_initial_rows,
-                last_rows=user_last_rows,
-            )
-        )
+    write_csv(output_dir / "metrics_summary.csv", rows, METRICS_SUMMARY_FIELDS)
 
-    write_csv(output_dir / "metrics_summary.csv", summary_rows, METRICS_SUMMARY_FIELDS)
-    write_csv(output_dir / "metrics_by_user.csv", by_user_rows, METRICS_BY_USER_FIELDS)
-    write_metrics_graphs(output_dir=output_dir, summary_rows=summary_rows, by_user_rows=by_user_rows)
+    print("\n=== 예측 정확도 비교 지표 ===")
+    print_table(rows, METRICS_SUMMARY_FIELDS)
 
-    print("\n=== 예측 정확도 비교 지표: 전체 ===")
-    print_table(summary_rows, METRICS_SUMMARY_FIELDS)
-
-    print("\n=== 예측 정확도 비교 지표: 사용자별 ===")
-    print_table(by_user_rows, METRICS_BY_USER_FIELDS)
-
-    print("\n=== 비교 지표 파일 저장 완료 ===")
-    print(output_dir / "metrics_summary.csv")
-    print(output_dir / "metrics_by_user.csv")
-    print(output_dir / "metrics_mae_comparison.png")
-    print(output_dir / "metrics_mape_comparison.png")
-    print(output_dir / "metrics_by_user_mae.png")
-
-    return summary_rows, by_user_rows
-
-
-def write_metrics_graphs(
-    *,
-    output_dir: Path,
-    summary_rows: list[Row],
-    by_user_rows: list[Row],
-) -> None:
-    """matplotlib가 설치되어 있으면 비교 지표 그래프를 PNG로 저장한다."""
-    try:
-        import matplotlib.pyplot as plt
-    except ModuleNotFoundError:
-        print(
-            "\n[그래프 저장 건너뜀] matplotlib가 설치되어 있지 않습니다. "
-            "그래프까지 저장하려면 `uv add matplotlib` 실행 후 다시 돌려주세요."
-        )
-        return
-
-    if not summary_rows:
-        return
-
-    summary = summary_rows[0]
-
-    labels = ["Initial estimate", "Last session"]
-    mae_values = [float(summary["initial_mae"]), float(summary["last_mae"])]
-    mape_values = [float(summary["initial_mape"]), float(summary["last_mape"])]
-
-    fig = plt.figure(figsize=(7, 5))
-    plt.bar(labels, mae_values)
-    plt.title("MAE comparison")
-    plt.ylabel("Minutes")
-    for index, value in enumerate(mae_values):
-        plt.text(index, value, f"{value:.2f}", ha="center", va="bottom")
-    plt.tight_layout()
-    fig.savefig(output_dir / "metrics_mae_comparison.png", dpi=200)
-    plt.close(fig)
-
-    fig = plt.figure(figsize=(7, 5))
-    plt.bar(labels, mape_values)
-    plt.title("MAPE comparison")
-    plt.ylabel("Percent")
-    for index, value in enumerate(mape_values):
-        plt.text(index, value, f"{value:.2f}%", ha="center", va="bottom")
-    plt.tight_layout()
-    fig.savefig(output_dir / "metrics_mape_comparison.png", dpi=200)
-    plt.close(fig)
-
-    if by_user_rows:
-        user_labels: list[str] = []
-        initial_user_mae: list[float] = []
-        last_user_mae: list[float] = []
-        for row in by_user_rows:
-            user_labels.append(str(row["user_name"]))
-            initial_user_mae.append(float(row["initial_mae"]))
-            last_user_mae.append(float(row["last_mae"]))
-
-        x_positions = list(range(len(user_labels)))
-        width = 0.35
-        fig = plt.figure(figsize=(8, 5))
-        plt.bar([x - width / 2 for x in x_positions], initial_user_mae, width, label="Initial")
-        plt.bar([x + width / 2 for x in x_positions], last_user_mae, width, label="Last session")
-        plt.title("MAE comparison by user")
-        plt.ylabel("Minutes")
-        plt.xticks(x_positions, user_labels)
-        plt.legend()
-        plt.tight_layout()
-        fig.savefig(output_dir / "metrics_by_user_mae.png", dpi=200)
-        plt.close(fig)
+    return rows
 
 
 # -----------------------------------------------------------------------------
-# 8. 실행 진입점
+# 9. 최종 profile JSON 저장
 # -----------------------------------------------------------------------------
 
-def default_user_files(data_dir: Path) -> list[dict[str, Any]]:
-    return [
-        {
-            "user_id": 1,
-            "user_name": "세진",
-            "tasks_path": data_dir / "세진_tasks.csv",
-            "sessions_path": data_dir / "세진_sessions.csv",
-        },
-        {
-            "user_id": 2,
-            "user_name": "나영",
-            "tasks_path": data_dir / "나영_tasks.csv",
-            "sessions_path": data_dir / "나영_sessions.csv",
-        },
-    ]
+def save_final_profile_json(output_dir: Path, profile_rows: list[Row]) -> None:
+    if not profile_rows:
+        return
 
+    last = profile_rows[-1]
+
+    final_profile = {
+        "completed_count": last["completed_count"],
+        "user_global": last["user_global"],
+        "user_type_residual": json.loads(last["user_type_residual"]),
+        "user_difficulty_residual": json.loads(last["user_difficulty_residual"]),
+        "user_folder_residual": json.loads(last["user_folder_residual"]),
+        "type_count": json.loads(last["type_count"]),
+        "difficulty_count": json.loads(last["difficulty_count"]),
+        "folder_count": json.loads(last["folder_count"]),
+    }
+
+    path = output_dir / "final_user_ai_profile.json"
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(final_profile, file, ensure_ascii=False, indent=2)
+
+    print("\n=== 최종 사용자 AI 보정값 ===")
+    print(json.dumps(final_profile, ensure_ascii=False, indent=2))
+    print(f"\n저장 완료: {path}")
+
+
+# -----------------------------------------------------------------------------
+# 10. 실행 진입점
+# -----------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--data-dir", type=Path, default=Path("."))
     parser.add_argument("--output-dir", type=Path, default=Path("./realplan_simulation_output"))
+    parser.add_argument("--experiment-name", type=str, default="sejin_dummy_30")
+
+    parser.add_argument("--user-id", type=int, default=1)
+    parser.add_argument("--user-name", type=str, default="세진")
+
     parser.add_argument(
-        "--experiment-name",
+        "--tasks-file",
         type=str,
-        default="baseline",
-        help="결과 CSV/콘솔에 기록할 실험 이름. 예: baseline, exp1_blending_weight",
+        default="sejin_demo_completed_tasks_30.csv",
+        help="data-dir 기준 완료 태스크 CSV 파일명",
     )
+    parser.add_argument(
+        "--sessions-file",
+        type=str,
+        default="sejin_demo_sessions_for_30_completed_tasks.csv",
+        help="data-dir 기준 세션 CSV 파일명",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
     output_dir: Path = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    all_task_results: list[Row] = []
-    all_session_results: list[Row] = []
-    all_profile_results: list[Row] = []
-    all_prediction_timeline_results: list[Row] = []
+    tasks_path = args.data_dir / args.tasks_file
+    sessions_path = args.data_dir / args.sessions_file
+
+    if not tasks_path.exists():
+        raise FileNotFoundError(tasks_path)
+    if not sessions_path.exists():
+        raise FileNotFoundError(sessions_path)
 
     print("\n=== RealPlan 원본 서비스 호출 기반 시뮬레이션 시작 ===")
     print(f"Experiment: {args.experiment_name}")
     print(f"Python path[0]: {sys.path[0]}")
     print(f"Data dir: {args.data_dir.resolve()}")
+    print(f"Tasks file: {tasks_path.resolve()}")
+    print(f"Sessions file: {sessions_path.resolve()}")
     print(f"Output dir: {output_dir.resolve()}")
 
-    for user in default_user_files(args.data_dir):
-        if not user["tasks_path"].exists():
-            raise FileNotFoundError(user["tasks_path"])
-        if not user["sessions_path"].exists():
-            raise FileNotFoundError(user["sessions_path"])
+    task_rows, session_rows, profile_rows, timeline_rows = simulate_user(
+        user_id=args.user_id,
+        user_name=args.user_name,
+        tasks_path=tasks_path,
+        sessions_path=sessions_path,
+    )
 
-        task_rows, session_rows, profile_rows, timeline_rows = simulate_user(**user)
-        all_task_results.extend(task_rows)
-        all_session_results.extend(session_rows)
-        all_profile_results.extend(profile_rows)
-        all_prediction_timeline_results.extend(timeline_rows)
+    print(f"\n[사용자: {args.user_name}]")
+    print(f"- 완료 태스크 수: {len(task_rows)}")
+    print(f"- 잔여 시간 재예측 세션 수: {len(session_rows)}")
 
-        print(f"\n[사용자: {user['user_name']}]")
-        print(f"- 완료 태스크 수: {len(task_rows)}")
-        print(f"- 잔여 시간 재예측 세션 수: {len(session_rows)}")
-        if profile_rows:
-            last = profile_rows[-1]
-            print(f"- 최종 completedCount: {last['completed_count']}")
-            print(f"- 최종 userGlobal: {last['user_global']}")
+    if profile_rows:
+        last = profile_rows[-1]
+        print(f"- 최종 completedCount: {last['completed_count']}")
+        print(f"- 최종 userGlobal: {last['user_global']}")
 
-        preview_cols = [
-            "task_id",
-            "title",
-            "estimated_minutes_user",
-            "ai_estimated_minutes_at_registration",
-            "actual_minutes",
-            "planning_error_ratio_actual_div_user_estimated",
-            "estimate_stage",
-            "user_global_after",
-            "dropped",
-        ]
-        if task_rows:
-            print_table(task_rows, preview_cols)
+    preview_cols = [
+        "task_id",
+        "title",
+        "folder_raw",
+        "estimated_minutes_user",
+        "ai_estimated_minutes_at_registration",
+        "actual_minutes",
+        "estimate_stage",
+        "update_stage",
+        "user_global_after",
+        "dropped",
+    ]
 
-    write_csv(output_dir / "task_estimate_and_update_results.csv", all_task_results, TASK_RESULT_FIELDS)
-    write_csv(output_dir / "session_remaining_results.csv", all_session_results, SESSION_RESULT_FIELDS)
-    write_csv(output_dir / "profile_history_results.csv", all_profile_results, PROFILE_RESULT_FIELDS)
+    if task_rows:
+        print("\n=== 태스크별 초기 예측/업데이트 요약 ===")
+        print_table(task_rows, preview_cols)
+
+    write_csv(
+        output_dir / "task_estimate_and_update_results.csv",
+        task_rows,
+        TASK_RESULT_FIELDS,
+    )
+    write_csv(
+        output_dir / "session_remaining_results.csv",
+        session_rows,
+        SESSION_RESULT_FIELDS,
+    )
+    write_csv(
+        output_dir / "profile_history_results.csv",
+        profile_rows,
+        PROFILE_RESULT_FIELDS,
+    )
     write_csv(
         output_dir / "prediction_timeline_results.csv",
-        all_prediction_timeline_results,
+        timeline_rows,
         PREDICTION_TIMELINE_RESULT_FIELDS,
     )
 
     metadata = {
         "experiment": args.experiment_name,
+        "user_id": args.user_id,
+        "user_name": args.user_name,
         "system_global_prior": SYSTEM_GLOBAL_PRIOR,
         "system_global_prior_ratio": math.exp(SYSTEM_GLOBAL_PRIOR),
         "system_type_effect": SYSTEM_TYPE_EFFECT,
         "system_difficulty_effect": SYSTEM_DIFFICULTY_EFFECT,
+        "folder_id_map": FOLDER_ID_MAP,
     }
+
     with (output_dir / "experiment_metadata.json").open("w", encoding="utf-8") as file:
         json.dump(metadata, file, ensure_ascii=False, indent=2)
 
     compute_and_save_metrics(
-        timeline_rows=all_prediction_timeline_results,
+        timeline_rows=timeline_rows,
         output_dir=output_dir,
         experiment_name=args.experiment_name,
     )
+
+    save_final_profile_json(output_dir, profile_rows)
 
     print("\n=== 출력 파일 저장 완료 ===")
     print(output_dir / "task_estimate_and_update_results.csv")
     print(output_dir / "session_remaining_results.csv")
     print(output_dir / "profile_history_results.csv")
     print(output_dir / "prediction_timeline_results.csv")
+    print(output_dir / "metrics_summary.csv")
+    print(output_dir / "final_user_ai_profile.json")
     print(output_dir / "experiment_metadata.json")
 
 
