@@ -82,6 +82,52 @@ def test_single_session_is_placed_continuously():
     assert response.summary.scheduledMinutes == 60
 
 
+def test_schedule_block_response_uses_slot_indexes():
+    response = auto_place_sessions(
+        _request(
+            schedulableTimeBlocks=[
+                dict(start="09:00", end="10:30"),
+            ],
+            focusTimeSlots=[
+                dict(start="09:00", end="10:30", focusScore=80),
+            ],
+            tasks=[_task(101, 90)],
+            taskSessions=[_session(101, 90)],
+        )
+    )
+
+    assert response.model_dump()["scheduleBlocks"] == [
+        {
+            "dailyPlanSessionId": None,
+            "taskId": 101,
+            "slotIndexes": [6, 7, 8],
+        }
+    ]
+
+
+def test_auto_place_request_accepts_slot_indexes():
+    req = _request(
+        schedulableTimeBlocks=[
+            dict(slotIndexes=[6, 7, 8]),
+        ],
+        focusTimeSlots=[
+            dict(slotIndexes=[6, 7, 8], focusScore=80),
+        ],
+        tasks=[_task(101, 90)],
+        taskSessions=[_session(101, 90)],
+    )
+
+    response = auto_place_sessions(req)
+
+    assert response.model_dump()["scheduleBlocks"] == [
+        {
+            "dailyPlanSessionId": None,
+            "taskId": 101,
+            "slotIndexes": [6, 7, 8],
+        }
+    ]
+
+
 def test_auto_place_rounds_raw_session_minutes_up_to_slot_unit():
     req = _request(
         schedulableTimeBlocks=[

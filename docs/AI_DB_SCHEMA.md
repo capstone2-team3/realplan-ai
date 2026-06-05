@@ -99,9 +99,7 @@
 | `session_block_id` | `BIGSERIAL` | 없음 | PK |
 | `daily_plan_session_id` | `BIGINT` | `scheduleBlocks[].dailyPlanSessionId` | 소속 논리 세션 FK. `daily_plan_session.daily_plan_session_id` 참조 |
 | `block_order` | `INTEGER` | 응답 배열 순서 | 같은 논리 세션 안에서의 실제 배치 조각 순서 |
-| `start_time` | `VARCHAR(5)` | `scheduleBlocks[].start` | 배치 시작 시각. `27:00` 표현을 허용하기 위해 문자열로 저장 |
-| `end_time` | `VARCHAR(5)` | `scheduleBlocks[].end` | 배치 종료 시각 |
-| `duration_minutes` | `INTEGER` | `scheduleBlocks[].durationMinutes` | 배치 조각 길이. 보통 30분 단위 |
+| `slot_indexes` | `INTEGER[]` | `scheduleBlocks[].slotIndexes` | 06:00~27:00 범위의 30분 슬롯 번호 목록. 예: `09:00~10:30`은 `[6, 7, 8]` |
 | `created_at` | `TIMESTAMP(6)` | 없음 | 생성 시각 |
 | `updated_at` | `TIMESTAMP(6)` | 없음 | 수정 시각 |
 
