@@ -108,48 +108,29 @@ def validate_auto_placement_request(request: AutoPlacementRequest) -> None:
     for task in request.tasks:
         if task.targetMinutes <= 0:
             raise ValueError(f"taskId={task.taskId}의 targetMinutes는 0보다 커야 합니다.")
-        rounded_target_minutes = _ceil_to_unit(task.targetMinutes, slot_unit)
-        if session_sums[task.taskId] not in {
-            task.targetMinutes,
-            rounded_target_minutes,
-        }:
+        if session_sums[task.taskId] != task.targetMinutes:
             raise ValueError(
-                f"taskId={task.taskId}의 taskSessions 합계가 targetMinutes 또는 "
-                "슬롯 단위 targetMinutes와 다릅니다: "
-                f"{session_sums[task.taskId]} != {task.targetMinutes}/{rounded_target_minutes}"
+                f"taskId={task.taskId}의 taskSessions 합계가 targetMinutes와 다릅니다: "
+                f"{session_sums[task.taskId]} != {task.targetMinutes}"
             )
 
 
 def normalize_for_slot_placement(request: AutoPlacementRequest) -> AutoPlacementRequest:
-    """태스크별 목표 시간을 슬롯 단위로 맞춘 뒤 세션에 배분한다."""
+    """자동 배치 직전에 raw 세션 시간을 slotUnitMinutes 단위로 올림한다."""
 
     slot_unit = request.slotUnitMinutes
-    sessions_by_task: dict[int, list[PlacementTaskSession]] = defaultdict(list)
-    for session in request.taskSessions:
-        sessions_by_task[session.taskId].append(session)
-
-    allocated_minutes_by_task: dict[int, list[int]] = {}
-    rounded_sums: dict[int, int] = {}
-    for task in request.tasks:
-        allocated_minutes = _allocate_session_minutes_to_slot_budget(
-            target_minutes=task.targetMinutes,
-            sessions=sessions_by_task[task.taskId],
-            slot_unit_minutes=slot_unit,
+    rounded_sessions = [
+        session.model_copy(
+            update={
+                "sessionMinutes": _ceil_to_unit(session.sessionMinutes, slot_unit),
+            }
         )
-        allocated_minutes_by_task[task.taskId] = allocated_minutes
-        rounded_sums[task.taskId] = sum(allocated_minutes)
+        for session in request.taskSessions
+    ]
 
-    task_session_offsets: dict[int, int] = defaultdict(int)
-    rounded_sessions: list[PlacementTaskSession] = []
-    for session in request.taskSessions:
-        offset = task_session_offsets[session.taskId]
-        task_session_offsets[session.taskId] += 1
-        session_minutes = allocated_minutes_by_task[session.taskId][offset]
-        if session_minutes <= 0:
-            continue
-        rounded_sessions.append(
-            session.model_copy(update={"sessionMinutes": session_minutes})
-        )
+    rounded_sums: dict[int, int] = defaultdict(int)
+    for session in rounded_sessions:
+        rounded_sums[session.taskId] += session.sessionMinutes
 
     rounded_tasks = [
         task.model_copy(update={"targetMinutes": rounded_sums[task.taskId]})
@@ -162,42 +143,6 @@ def normalize_for_slot_placement(request: AutoPlacementRequest) -> AutoPlacement
             "taskSessions": rounded_sessions,
         }
     )
-
-
-def _allocate_session_minutes_to_slot_budget(
-    *,
-    target_minutes: int,
-    sessions: list[PlacementTaskSession],
-    slot_unit_minutes: int,
-) -> list[int]:
-    """세션별 올림 누적으로 태스크 총 배치 시간이 과대해지지 않게 슬롯을 배분한다."""
-
-    target_slots = _ceil_to_unit(target_minutes, slot_unit_minutes) // slot_unit_minutes
-    session_sum = sum(session.sessionMinutes for session in sessions)
-    if session_sum == target_slots * slot_unit_minutes and all(
-        session.sessionMinutes % slot_unit_minutes == 0 for session in sessions
-    ):
-        return [session.sessionMinutes for session in sessions]
-
-    allocated_slots = [
-        session.sessionMinutes // slot_unit_minutes
-        for session in sessions
-    ]
-    remaining_slots = target_slots - sum(allocated_slots)
-    if remaining_slots <= 0:
-        return [slots * slot_unit_minutes for slots in allocated_slots]
-
-    remainder_order = sorted(
-        range(len(sessions)),
-        key=lambda index: (
-            -(sessions[index].sessionMinutes % slot_unit_minutes),
-            index,
-        ),
-    )
-    for index in remainder_order[:remaining_slots]:
-        allocated_slots[index] += 1
-
-    return [slots * slot_unit_minutes for slots in allocated_slots]
 
 
 def _validate_schedulable_blocks(blocks: list[TimeBlock], slot_unit_minutes: int) -> None:

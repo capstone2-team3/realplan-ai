@@ -129,7 +129,7 @@ def test_fallback_remaining_30_returns_single_session():
     assert response.taskSessions[0].requiredFocusLevel == "LOW"
 
 
-def test_fallback_rounds_remaining_minutes_up_to_slot_unit():
+def test_fallback_preserves_raw_remaining_minutes():
     req = _make_request(
         tasks=[
             dict(
@@ -144,7 +144,7 @@ def test_fallback_rounds_remaining_minutes_up_to_slot_unit():
 
     response = fallback_decompose(req)
 
-    assert _minutes(response) == [30]
+    assert _minutes(response) == [20]
 
 
 @pytest.mark.parametrize(
@@ -214,7 +214,7 @@ def test_fallback_uses_backend_slot_unit_policy():
 
     response = fallback_decompose(req)
 
-    assert _minutes(response) == [30, 30, 30]
+    assert _minutes(response) == [30, 30, 20]
     validate_decomposition_response(req, response)
 
 
@@ -258,25 +258,6 @@ def test_openai_messages_use_derived_target_minutes():
     assert payload["tasks"][0]["memo"] == "초안 검토와 발표 흐름 정리"
     assert "remainingMin" not in payload["tasks"][0]
     assert "activeScheduledMin" not in payload["tasks"][0]
-
-
-def test_openai_messages_use_slot_rounded_target_minutes():
-    req = _make_request(
-        tasks=[
-            dict(
-                taskId=1,
-                title="OS 챕터 7 문제 풀기",
-                taskType="QUANTITY_BASED",
-                difficulty="MEDIUM",
-                remainingMin=128,
-            )
-        ]
-    )
-
-    messages = task_decomposition.build_openai_messages(req)
-    payload = json.loads(messages[1]["content"])
-
-    assert payload["tasks"][0]["targetMinutes"] == 150
 
 
 def test_openai_messages_include_null_memo_when_missing():
@@ -330,29 +311,6 @@ def test_validate_response_rejects_wrong_sum():
     )
 
     with pytest.raises(ValueError, match="세션 합계"):
-        validate_decomposition_response(req, response)
-
-
-def test_validate_response_rejects_non_slot_unit_session_minutes():
-    req = _make_request(
-        tasks=[
-            dict(
-                taskId=101,
-                title="OS 챕터 7 문제 풀기",
-                taskType="QUANTITY_BASED",
-                difficulty="MEDIUM",
-                remainingMin=128,
-            )
-        ]
-    )
-    response = TaskDecompositionResponse(
-        taskSessions=[
-            TaskSession(taskId=101, sessionMinutes=64, requiredFocusLevel="MEDIUM"),
-            TaskSession(taskId=101, sessionMinutes=64, requiredFocusLevel="MEDIUM"),
-        ]
-    )
-
-    with pytest.raises(ValueError, match="배수"):
         validate_decomposition_response(req, response)
 
 

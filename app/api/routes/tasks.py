@@ -43,6 +43,7 @@ def classify(req: ClassifyRequest, request: Request):
 
     inp = ClassifyInput(
         name=req.name,
+        memo=req.memo,
         user_history=history,
     )
 
