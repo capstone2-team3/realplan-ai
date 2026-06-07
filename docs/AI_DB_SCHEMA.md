@@ -66,7 +66,7 @@
 | `task_id` | `BIGINT` | `taskSessions[].taskId` | 원본 태스크 FK. 조회 편의를 위해 중복 저장 |
 | `user_id` | `BIGINT` | 없음 | 사용자 FK. 조회 편의를 위해 중복 저장 |
 | `session_order` | `INTEGER` | 응답 배열 순서 | 같은 `daily_plan_task_id` 안에서의 분할 세션 순서 |
-| `session_minutes` | `INTEGER` | `taskSessions[].sessionMinutes` | 분할 세션의 raw 시간. 자동배치 전에는 30분 단위가 아닐 수 있음 |
+| `session_minutes` | `INTEGER` | `taskSessions[].sessionMinutes` | 자동배치용 분할 세션 시간. `slotUnitMinutes` 단위 |
 | `required_focus_level` | `VARCHAR(10)` | `taskSessions[].requiredFocusLevel` | 자동배치 집중도 매칭에 쓰는 요구 집중도. `HIGH`, `MEDIUM`, `LOW`, `FLEXIBLE` |
 | `source_type` | `VARCHAR(10)` | 없음 | 생성 출처. 기본값 `AI`, 허용값 `AI`, `USER`, `BOTH` |
 | `status` | `VARCHAR(15)` | 없음 | 세션 계획 상태. 기본값 `PLANNED`, 허용값 `PLANNED`, `SCHEDULED`, `PARTIAL`, `UNSCHEDULED`, `IN_PROGRESS`, `DONE`, `SKIPPED` |
@@ -86,7 +86,7 @@
 
 - 백엔드가 `/tasks/decompose` 응답을 받은 뒤, 사용자가 “시간표 자동 완성” 결과를 저장하거나 확정할 때 생성합니다.
 - 같은 원본 태스크가 여러 세션으로 분할되면 같은 `daily_plan_task_id` 아래에 `session_order`만 다르게 여러 행을 저장합니다.
-- 자동배치에서 30분 단위로 올림된 실제 배치 결과는 `daily_plan_session_block`에 저장합니다.
+- 자동배치에서 실제 시간대가 확정된 배치 결과는 `daily_plan_session_block`에 저장합니다.
 
 ### `daily_plan_session_block`
 
@@ -99,9 +99,7 @@
 | `session_block_id` | `BIGSERIAL` | 없음 | PK |
 | `daily_plan_session_id` | `BIGINT` | `scheduleBlocks[].dailyPlanSessionId` | 소속 논리 세션 FK. `daily_plan_session.daily_plan_session_id` 참조 |
 | `block_order` | `INTEGER` | 응답 배열 순서 | 같은 논리 세션 안에서의 실제 배치 조각 순서 |
-| `start_time` | `VARCHAR(5)` | `scheduleBlocks[].start` | 배치 시작 시각. `27:00` 표현을 허용하기 위해 문자열로 저장 |
-| `end_time` | `VARCHAR(5)` | `scheduleBlocks[].end` | 배치 종료 시각 |
-| `duration_minutes` | `INTEGER` | `scheduleBlocks[].durationMinutes` | 배치 조각 길이. 보통 30분 단위 |
+| `slot_indexes` | `INTEGER[]` | `scheduleBlocks[].slotIndexes` | 06:00~27:00 범위의 30분 슬롯 번호 목록. 예: `09:00~10:30`은 `[6, 7, 8]` |
 | `created_at` | `TIMESTAMP(6)` | 없음 | 생성 시각 |
 | `updated_at` | `TIMESTAMP(6)` | 없음 | 수정 시각 |
 
@@ -455,10 +453,10 @@ DB에서는 `task_type_id`로 저장하지만, Python API에는 `task_type.code`
 | 단계 | 시간 처리 |
 |---|---|
 | 추천 | 시간 분할/올림을 하지 않고 추천도 중심으로 계산 |
-| 태스크 분할 | raw 시간을 그대로 세션으로 분할 |
-| 자동배치 | 실제 슬롯 배치 단계에서만 30분 단위로 올림 |
+| 태스크 분할 | raw 잔여 배치 가능 시간을 슬롯 단위로 올린 뒤 세션으로 분할 |
+| 자동배치 | 슬롯 단위 세션을 실제 슬롯 번호에 배치 |
 | `daily_plan_task.planned_minutes` | 실제 일일 계획에 배치된 시간 |
-| `daily_plan_session.session_minutes` | Python 분할 결과의 raw 세션 시간 |
+| `daily_plan_session.session_minutes` | Python 분할 결과의 슬롯 단위 세션 시간 |
 | `focus_session.planned_minutes` | 실제 시작한 집중 세션에 계획되어 있던 시간 |
 
 ## 주의사항

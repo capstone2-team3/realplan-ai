@@ -24,7 +24,6 @@ class HistoricalTask:
 class ClassifyInput:
     """분류기 입력. Backend에서 보낼 정보."""
     name: str
-    memo: Optional[str] = None
     user_history: Optional[list[HistoricalTask]] = None
 
 

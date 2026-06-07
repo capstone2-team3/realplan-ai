@@ -54,6 +54,49 @@ def test_validation_error_uses_common_format():
     assert body["error"]["message"]
 
 
+def test_auto_place_uses_slot_indexes_in_request_and_response():
+    response = client.post(
+        "/schedules/auto-place",
+        json={
+            "slotUnitMinutes": 30,
+            "schedulableTimeBlocks": [
+                {"slotIndexes": [6, 7, 8]},
+            ],
+            "focusTimeSlots": [
+                {"slotIndexes": [6, 7, 8], "focusScore": 80},
+            ],
+            "tasks": [
+                {
+                    "taskId": 101,
+                    "isDueToday": True,
+                    "recommendScore": 90,
+                    "targetMinutes": 90,
+                    "difficulty": "HIGH",
+                },
+            ],
+            "taskSessions": [
+                {
+                    "taskId": 101,
+                    "sessionMinutes": 90,
+                    "requiredFocusLevel": "HIGH",
+                },
+            ],
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    _assert_common_response(body, "SUCCESS", "/schedules/auto-place")
+    assert body["success"]["data"]["scheduleBlocks"] == [
+        {
+            "dailyPlanSessionId": None,
+            "taskId": 101,
+            "slotIndexes": [6, 7, 8],
+        }
+    ]
+    assert "start" not in body["success"]["data"]["scheduleBlocks"][0]
+
+
 def test_unknown_request_fields_are_rejected():
     response = client.post(
         "/tasks/estimate",
@@ -74,6 +117,22 @@ def test_unknown_request_fields_are_rejected():
     _assert_common_response(body, "FAIL", "/tasks/estimate")
     assert body["error"]["code"] == "VALIDATION_ERROR"
     assert "systemPriorityEffect" in body["error"]["message"]
+
+
+def test_classify_rejects_memo_field():
+    response = client.post(
+        "/tasks/classify",
+        json={
+            "name": "운영체제 Chap.3 정리",
+            "memo": "개념 정리",
+        },
+    )
+    body = response.json()
+
+    assert response.status_code == 422
+    _assert_common_response(body, "FAIL", "/tasks/classify")
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "memo" in body["error"]["message"]
 
 
 def test_calculation_error_uses_common_format():
