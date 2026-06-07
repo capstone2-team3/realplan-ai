@@ -21,6 +21,25 @@ FOCUS_WEIGHT_MAP: dict[FocusLevel, float] = {
 # 진행률이 낮을수록 재계산값의 반영 비중을 줄이고 previousAiTotal을 더 신뢰한다.
 BLENDING_WEIGHT_BASE = 0.4
 
+def compute_blending_weight(progress: float) -> float:
+    """진행률에 따라 진행률 기반 추정값의 반영 비중을 결정한다.
+
+    기존 로직은 blendingWeight = 0.4 * progress 로 계산했기 때문에
+    진행률이 높아져도 기존 AI 예측값을 지나치게 강하게 유지했다.
+
+    실험 버전에서는 진행률이 높을수록 현재 세션 진행률 기반 추정값을
+    더 강하게 반영하여, 세션이 진행될수록 실제 총 소요시간에 더 빠르게
+    수렴하는지 확인한다.
+    """
+
+    if progress < 0.3:
+        return 0.25
+    if progress < 0.6:
+        return 0.50
+    if progress < 0.9:
+        return 0.75
+    return 0.90
+
 
 def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse:
     """세션 중간/종료 입력을 바탕으로 다음에 사용할 AI 총 소요시간을 재계산한다.
@@ -33,36 +52,46 @@ def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse
             "INVALID_INPUT",
             "elapsedMinutes must be > 0",
         )
+    
+    if req.progress <= 0:
+        raise CalculationError(
+            "INVALID_INPUT",
+            "progress must be > 0",
+        )
 
     focus_weight = FOCUS_WEIGHT_MAP[req.focusLevel]
 
-    # Step 1: 진행률 기반 잔여시간 (총 시간을 거치지 않고 잔여만 직접 외삽)
+    # Step 1: 진행률 기반 잔여시간
+    # 현재까지 걸린 시간과 진행률을 바탕으로 남은 시간을 직접 외삽한다.
     progress_based_remaining = req.elapsedMinutes * (1 / req.progress - 1)
 
-    # Step 2: 집중도 보정 — 현재 집중도 기준 잔여시간을 보통 집중 기준으로 환산.
-    # 산만(0.8): 160분 × 0.6 = 96분 (보통으로 하면 더 빨리 끝남)
-    # 몰입(1.5): 30분 × 1.5 = 45분 (보통으로 하면 더 오래 걸림)
+    # Step 2: 집중도 보정
+    # 현재 집중도 기준 잔여시간을 보통 집중 기준으로 환산한다.
+    # 산만(0.8): 같은 진행률을 보통 집중으로 수행하면 더 빨리 끝난다고 보고 잔여시간을 줄임
+    # 몰입(1.5): 같은 진행률을 보통 집중으로 수행하면 더 오래 걸린다고 보고 잔여시간을 늘림
     normal_focus_remaining = progress_based_remaining * focus_weight
 
-    # Step 3: 두 총 소요시간 추정값을 blending.
-    # - normal_focus_total: 진행률+집중도 기반 총 소요시간 추정값
-    # - previousAiTotalMinutes: 기존 AI 예측 총 소요시간
-    # 진행률이 낮을수록 진행률 기반 추정의 신뢰도가 낮으므로 기존 AI 예측을 더 신뢰한다.
+    # Step 3: 진행률+집중도 기반 총 소요시간 추정값 계산
     normal_focus_total = req.elapsedMinutes + normal_focus_remaining
-    blending_weight = BLENDING_WEIGHT_BASE * req.progress
+
+    # Step 4: 기존 AI 총 소요시간과 현재 세션 기반 총 소요시간을 blending
+    # 진행률이 낮을 때는 기존 AI 예측을 더 신뢰하고,
+    # 진행률이 높아질수록 현재 세션 진행률 기반 추정값을 더 신뢰한다.
+    blending_weight = compute_blending_weight(req.progress)
     updated_ai_total = (
         blending_weight * normal_focus_total
         + (1 - blending_weight) * req.previousAiTotalMinutes
     )
 
-    # Step 4: 잔여시간 산출
+    # Step 5: 잔여시간 산출
     # updated_ai_total < elapsed이면 예측 시간을 초과한 상태.
-    # -> 미완료(progress < 1.0)인 경우 스케줄링을 위해 최소 30분을 보장한다.
+    # 미완료(progress < 1.0)인 경우 스케줄링을 위해 최소 30분을 보장한다.
     raw_remaining = updated_ai_total - req.elapsedMinutes
     if raw_remaining <= 0 and req.progress < 1.0:
         final_remaining = 30.0
     else:
         final_remaining = max(0.0, raw_remaining)
+        
     updated_ai_total = req.elapsedMinutes + final_remaining
 
     return SessionRemainingResponse(
