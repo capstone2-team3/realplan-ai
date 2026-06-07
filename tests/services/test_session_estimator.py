@@ -10,8 +10,8 @@ from pydantic import ValidationError
 from app.schemas.session import FocusLevel, SessionRemainingRequest
 from app.services.common import CalculationError
 from app.services.session_progress.remaining_estimator import (
-    BLENDING_WEIGHT_BASE,
     FOCUS_WEIGHT_MAP,
+    compute_blending_weight,
     estimate_remaining,
 )
 
@@ -37,20 +37,20 @@ def test_medium_focus_baseline():
       progressBased       = 70 × (1/0.5 - 1)            = 70
       focusAdjusted       = 70 × 1.0                    = 70
       normal_focus_total= 70 + 70                     = 140
-      blendingWeight      = 0.4 × 0.5                   = 0.2
-      ai_total_pre        = 0.2×140 + 0.8×200           = 188
-      raw_remaining       = 188 - 70                    = 118 (> 0)
-      final               = 118
-      updatedAiTotal      = 70 + 118                    = 188
+      blendingWeight      = 0.50
+      ai_total_pre        = 0.5×140 + 0.5×200           = 170
+      raw_remaining       = 170 - 70                    = 100 (> 0)
+      final               = 100
+      updatedAiTotal      = 70 + 100                    = 170
     """
     result = estimate_remaining(_make_request())
 
     assert math.isclose(result.focusWeight, 1.0)
     assert math.isclose(result.progressBasedRemainingMinutes, 70.0, rel_tol=1e-9)
     assert math.isclose(result.normalizedRemainingMinutes, 70.0, rel_tol=1e-9)
-    assert math.isclose(result.blendingWeight, 0.2, rel_tol=1e-9)
-    assert math.isclose(result.finalRemainingMinutes, 118.0, rel_tol=1e-9)
-    assert math.isclose(result.updatedAiTotalMinutes, 188.0, rel_tol=1e-9)
+    assert math.isclose(result.blendingWeight, 0.5, rel_tol=1e-9)
+    assert math.isclose(result.finalRemainingMinutes, 100.0, rel_tol=1e-9)
+    assert math.isclose(result.updatedAiTotalMinutes, 170.0, rel_tol=1e-9)
 
 
 # ---------- 집중도 정규화 방향 -----------------------------------------
@@ -90,20 +90,35 @@ def test_focus_weight_map_matches_spec():
     assert FOCUS_WEIGHT_MAP[FocusLevel.VERY_HIGH] == 1.5
 
 
-# ---------- blendingWeight progress 비례 -------------------------------
+# ---------- blendingWeight progress 구간 -------------------------------
 
 
 def test_blending_weight_low_progress():
-    """progress=0.1 → blendingWeight=0.04 (previousAiTotal을 96% 반영)."""
+    """progress=0.1 → blendingWeight=0.25."""
     result = estimate_remaining(_make_request(progress=0.1))
-    assert math.isclose(result.blendingWeight, BLENDING_WEIGHT_BASE * 0.1, rel_tol=1e-9)
-    assert math.isclose(result.blendingWeight, 0.04, rel_tol=1e-9)
+    assert math.isclose(result.blendingWeight, 0.25, rel_tol=1e-9)
 
 
 def test_blending_weight_high_progress():
-    """progress=0.9 → blendingWeight=0.36."""
+    """progress=0.9 → blendingWeight=0.90."""
     result = estimate_remaining(_make_request(progress=0.9))
-    assert math.isclose(result.blendingWeight, 0.36, rel_tol=1e-9)
+    assert math.isclose(result.blendingWeight, 0.90, rel_tol=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("progress", "expected"),
+    [
+        (0.29, 0.25),
+        (0.3, 0.50),
+        (0.59, 0.50),
+        (0.6, 0.75),
+        (0.89, 0.75),
+        (0.9, 0.90),
+        (1.0, 0.90),
+    ],
+)
+def test_compute_blending_weight_thresholds(progress, expected):
+    assert math.isclose(compute_blending_weight(progress), expected, rel_tol=1e-9)
 
 
 # ---------- raw_remaining ≤ 0 분기 ------------------------------------
@@ -111,13 +126,13 @@ def test_blending_weight_high_progress():
 
 def test_incomplete_overrun_gets_30min_fallback():
     """progress < 1.0인데 예측이 음수로 떨어지면 스케줄링용 30분 fallback."""
-    # elapsed=200, progress=0.5, MEDIUM, prev=120
+    # elapsed=200, progress=0.5, MEDIUM, prev=0
     #   progressBased=200, focusAdjusted=200
-    #   normal_focus_total=400, blendingWeight=0.2
-    #   ai_total_pre = 0.2×400 + 0.8×120 = 176
-    #   raw_remaining = 176 - 200 = -24 ≤ 0 AND progress < 1.0 → final=30.0
+    #   normal_focus_total=400, blendingWeight=0.5
+    #   ai_total_pre = 0.5×400 + 0.5×0 = 200
+    #   raw_remaining = 200 - 200 = 0 ≤ 0 AND progress < 1.0 → final=30.0
     result = estimate_remaining(
-        _make_request(elapsedMinutes=200.0, progress=0.5, previousAiTotalMinutes=120.0)
+        _make_request(elapsedMinutes=200.0, progress=0.5, previousAiTotalMinutes=0.0)
     )
     assert result.finalRemainingMinutes == 30.0
     assert result.updatedAiTotalMinutes == 230.0
@@ -128,9 +143,9 @@ def test_completed_overrun_clamps_to_zero():
     # elapsed=200, progress=1.0, MEDIUM, prev=120
     #   progressBased = 200 × (1/1.0 - 1) = 0
     #   focusAdjusted = 0, normal_focus_total = 200
-    #   blendingWeight = 0.4
-    #   ai_total_pre = 0.4×200 + 0.6×120 = 152
-    #   raw_remaining = -48 ≤ 0 AND progress >= 1.0 → final=0.0
+    #   blendingWeight = 0.9
+    #   ai_total_pre = 0.9×200 + 0.1×120 = 192
+    #   raw_remaining = -8 ≤ 0 AND progress >= 1.0 → final=0.0
     result = estimate_remaining(
         _make_request(elapsedMinutes=200.0, progress=1.0, previousAiTotalMinutes=120.0)
     )

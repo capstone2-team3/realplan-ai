@@ -21,31 +21,7 @@ FOCUS_WEIGHT_MAP: dict[FocusLevel, float] = {
 def compute_blending_weight(progress: float) -> float:
     """진행률에 따라 진행률 기반 추정값의 반영 비중을 결정한다.
 
-    기존 로직은 blendingWeight = 0.4 * progress 로 계산했기 때문에
-    진행률이 높아져도 기존 AI 예측값을 지나치게 강하게 유지했다.
-
-    실험 버전에서는 진행률이 높을수록 현재 세션 진행률 기반 추정값을
-    더 강하게 반영하여, 세션이 진행될수록 실제 총 소요시간에 더 빠르게
-    수렴하는지 확인한다.
-    """
-
-    if progress < 0.3:
-        return 0.25
-    if progress < 0.6:
-        return 0.50
-    if progress < 0.9:
-        return 0.75
-    return 0.90
-
-def compute_blending_weight(progress: float) -> float:
-    """진행률에 따라 진행률 기반 추정값의 반영 비중을 결정한다.
-
-    기존 로직은 blendingWeight = 0.4 * progress 로 계산했기 때문에
-    진행률이 높아져도 기존 AI 예측값을 지나치게 강하게 유지했다.
-
-    실험 버전에서는 진행률이 높을수록 현재 세션 진행률 기반 추정값을
-    더 강하게 반영하여, 세션이 진행될수록 실제 총 소요시간에 더 빠르게
-    수렴하는지 확인한다.
+    진행률이 높을수록 현재 세션 진행률 기반 추정값을 더 강하게 반영한다.
     """
 
     if progress < 0.3:
@@ -67,12 +43,6 @@ def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse
         raise CalculationError(
             "INVALID_INPUT",
             "elapsedMinutes must be > 0",
-        )
-    
-    if req.progress <= 0:
-        raise CalculationError(
-            "INVALID_INPUT",
-            "progress must be > 0",
         )
 
     if req.progress <= 0:
