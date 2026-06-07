@@ -1,0 +1,3 @@
+﻿experiment,user_name,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+exp02_session_blending_weight,나영,5,5,-82.33,107.73,38.84,3.1,3.1,2.39,104.63,97.12,36.45
+exp02_session_blending_weight,세진,11,11,-72.39,113.54,40.24,-20.26,25.81,4.09,87.73,77.27,36.15

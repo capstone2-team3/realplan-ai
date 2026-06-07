@@ -1,0 +1,16 @@
+{
+  "experiment": "baseline_zero_prior",
+  "system_global_prior": 0.0,
+  "system_global_prior_ratio": 1.0,
+  "system_type_effect": {
+    "TIME_BASED": 0.0,
+    "QUANTITY_BASED": 0.0,
+    "SATISFACTION_BASED": 0.0
+  },
+  "system_difficulty_effect": {
+    "LOW": 0.0,
+    "MEDIUM": 0.0,
+    "HIGH": 0.0,
+    "UNKNOWN": 0.0
+  }
+}

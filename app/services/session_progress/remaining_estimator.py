@@ -11,15 +11,31 @@ from app.services.common import CalculationError
 
 # 집중도 보정 가중치. 보통 집중(1.0) 기준 생산성 비율.
 FOCUS_WEIGHT_MAP: dict[FocusLevel, float] = {
-    FocusLevel.LOW:       0.8,
-    FocusLevel.MEDIUM:    1.0,
-    FocusLevel.HIGH:      1.2,
+    FocusLevel.LOW: 0.8,
+    FocusLevel.MEDIUM: 1.0,
+    FocusLevel.HIGH: 1.2,
     FocusLevel.VERY_HIGH: 1.5,
 }
 
-# EMA 기본 가중치. blendingWeight = BLENDING_WEIGHT_BASE × progress 로 사용해
-# 진행률이 낮을수록 재계산값의 반영 비중을 줄이고 previousAiTotal을 더 신뢰한다.
-BLENDING_WEIGHT_BASE = 0.4
+
+def compute_blending_weight(progress: float) -> float:
+    """진행률에 따라 진행률 기반 추정값의 반영 비중을 결정한다.
+
+    기존 로직은 blendingWeight = 0.4 * progress 로 계산했기 때문에
+    진행률이 높아져도 기존 AI 예측값을 지나치게 강하게 유지했다.
+
+    실험 버전에서는 진행률이 높을수록 현재 세션 진행률 기반 추정값을
+    더 강하게 반영하여, 세션이 진행될수록 실제 총 소요시간에 더 빠르게
+    수렴하는지 확인한다.
+    """
+
+    if progress < 0.3:
+        return 0.25
+    if progress < 0.6:
+        return 0.50
+    if progress < 0.9:
+        return 0.75
+    return 0.90
 
 def compute_blending_weight(progress: float) -> float:
     """진행률에 따라 진행률 기반 추정값의 반영 비중을 결정한다.
@@ -59,6 +75,12 @@ def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse
             "progress must be > 0",
         )
 
+    if req.progress <= 0:
+        raise CalculationError(
+            "INVALID_INPUT",
+            "progress must be > 0",
+        )
+
     focus_weight = FOCUS_WEIGHT_MAP[req.focusLevel]
 
     # Step 1: 진행률 기반 잔여시간
@@ -91,7 +113,7 @@ def estimate_remaining(req: SessionRemainingRequest) -> SessionRemainingResponse
         final_remaining = 30.0
     else:
         final_remaining = max(0.0, raw_remaining)
-        
+
     updated_ai_total = req.elapsedMinutes + final_remaining
 
     return SessionRemainingResponse(

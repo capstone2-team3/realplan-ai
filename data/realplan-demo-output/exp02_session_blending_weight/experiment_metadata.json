@@ -1,0 +1,16 @@
+{
+  "experiment": "exp02_session_blending_weight",
+  "system_global_prior": 0.44468582126144574,
+  "system_global_prior_ratio": 1.56,
+  "system_type_effect": {
+    "TIME_BASED": 0.0,
+    "QUANTITY_BASED": -0.071,
+    "SATISFACTION_BASED": 0.262
+  },
+  "system_difficulty_effect": {
+    "LOW": -0.05,
+    "MEDIUM": -0.022,
+    "HIGH": -0.031,
+    "UNKNOWN": 0.204
+  }
+}
