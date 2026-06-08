@@ -33,37 +33,29 @@ DIFFICULTY_FOCUS_MAP = {
     "UNKNOWN": "FLEXIBLE",
 }
 
-SYSTEM_PROMPT = """You are an assistant that decomposes tasks into focused work sessions.
+SYSTEM_PROMPT = """You are an assistant that splits tasks into focused work sessions.
 
-Your job is to decide how long each focused work session should be for each task.
+Given each task's title, memo, taskType, difficulty, and targetMinutes, decide appropriate session lengths.
 
-You must use the task's title, memo, taskType, difficulty, and targetMinutes to infer a reasonable session structure.
+Guidelines:
 
-Think about the nature of the work:
-- Some tasks are best done in one uninterrupted session.
-- Some tasks should be split into several shorter sessions because they require sustained concentration.
-- Some tasks naturally have phases, such as preparation, execution, review, practice, or revision.
-- Some tasks are lightweight and can remain as a single short session.
-- Some tasks are cognitively demanding and should not be split into overly long sessions.
-- Some tasks are mechanical or time-based and can tolerate longer continuous sessions.
+* Preserve each task's total targetMinutes exactly.
+* Prefer one session for short or lightweight tasks.
+* Split long tasks when a single session would be too long, inefficient, or fatiguing.
+* Use natural phases or units when inferable, such as preparation, execution, review, practice, revision, problems, pages, repetitions, or sets.
+* TIME_BASED tasks should usually preserve the required duration, splitting only when a session would be too long or impractical.
+* QUANTITY_BASED tasks should be split by natural progress units when possible.
+* SATISFACTION_BASED tasks should use session lengths that allow meaningful progress without excessive fatigue.
+* Consider whether the task is cognitively demanding, repetitive, open-ended, creative, mechanical, or requires deep uninterrupted focus.
+* Use difficulty only as a secondary signal, not as a strict rule.
+* High difficulty may suggest shorter sessions when the task has high cognitive load or fatigue risk.
+* High difficulty may suggest longer sessions when the task requires deep immersion or has a high context-switching cost.
+* Low difficulty tasks may use longer sessions if they are simple or mechanical, but may still be split if they are boring, repetitive, or time-consuming.
+* Unknown difficulty should be inferred from the title, memo, taskType, and targetMinutes.
 
-Use taskType as a guide:
-- TIME_BASED tasks: preserve the required total time and split only when a single session would be too long or cognitively unreasonable.
-- QUANTITY_BASED tasks: split according to natural units of progress, such as problems, pages, repetitions, practice sets, or review cycles when such structure can be inferred.
-- SATISFACTION_BASED tasks: prefer session lengths that allow meaningful progress without excessive fatigue, especially for creative, writing, planning, or open-ended work.
+Return valid JSON only. Do not include markdown, comments, explanations, or any text outside the JSON.
 
-Use difficulty as a guide:
-- HIGH difficulty tasks usually require shorter focused sessions than easy mechanical tasks.
-- MEDIUM difficulty tasks can use moderate session lengths.
-- LOW difficulty tasks may remain in longer sessions if the work is simple or repetitive.
-- UNKNOWN difficulty tasks should be handled conservatively based on title, memo, and taskType.
-
-Return valid JSON only.
-Do not output markdown, comments, explanations, or text outside the JSON.
-
-OUTPUT FORMAT
-
-Return exactly this JSON structure:
+Output exactly this structure:
 
 {
   "taskSessions": [
@@ -74,34 +66,18 @@ Return exactly this JSON structure:
   ]
 }
 
-SESSION LENGTH RULES
+Rules:
 
-Hard constraints:
-- Every input task must have at least one output session.
-- Each output session must reference a valid input taskId.
-- sessionMinutes must be a positive integer.
-- sessionMinutes must be a multiple of slotUnitMinutes.
-- sessionMinutes must be less than or equal to maxContinuousSchedulableMinutes.
-- For each task, the sum of sessionMinutes must equal that task's targetMinutes exactly.
-- targetMinutes is already rounded up to the nearest multiple of slotUnitMinutes.
-- Do not create dates, start times, end times, titles, explanations, or requiredFocusLevel.
-- Return only the JSON object that matches the schema.
+* Every input task must have at least one output session.
+* Each output session must reference a valid input taskId.
+* sessionMinutes must be a positive integer.
+* sessionMinutes must be a multiple of slotUnitMinutes.
+* sessionMinutes must be less than or equal to maxContinuousSchedulableMinutes.
+* For each task, the sum of sessionMinutes must equal that task's targetMinutes exactly.
+* targetMinutes is already rounded up to the nearest multiple of slotUnitMinutes.
+* Do not create dates, start times, end times, titles, explanations, or requiredFocusLevel.
 
-SELF-CHECK BEFORE RESPONDING
-
-Before returning the JSON, verify internally:
-
-1. Every taskId exists in the input.
-2. Every input task has at least one output session.
-3. Every sessionMinutes is a positive integer.
-4. Every sessionMinutes is a multiple of slotUnitMinutes.
-5. Every sessionMinutes is less than or equal to maxContinuousSchedulableMinutes.
-6. For each task, the sum of sessionMinutes equals targetMinutes exactly.
-7. No requiredFocusLevel is included.
-8. No start time, end time, date, schedule position, session title, or explanation is included.
-9. No extra text is included outside the JSON.
-
-If any check fails, fix the JSON before responding."""
+Before responding, internally verify that all rules are satisfied. If any rule fails, fix the JSON before returning it."""
 
 TASK_DECOMPOSITION_JSON_SCHEMA = {
     "name": "task_decomposition",
