@@ -63,7 +63,6 @@ class RecommendedTask:
     name: str
     remainingMin: int
     recommendScore: float
-    deadlineScore: int
     workloadUrgencyScore: int
     importanceScore: int
     isDueToday: bool
@@ -91,7 +90,6 @@ class _ScoredTask:
     due_date: date | None
     remaining_minutes: int
     recommend_score: float
-    deadline_score: int
     workload_urgency_score: int
     importance_score: int
     is_due_today: bool
@@ -153,31 +151,6 @@ def calculate_remaining_minutes(task: CandidateTask) -> int | None:
     )
 
 
-def deadline_score(due_date: date | datetime | None, target_date: date) -> int:
-    """마감일이 가까울수록 높은 점수를 주고, 마감이 없으면 낮은 기본 점수만 부여한다."""
-
-    due_day = _to_date(due_date)
-    if due_day is None:
-        return 5
-
-    days_left = (due_day - target_date).days
-    if days_left < 0:
-        return 20
-    if days_left == 0:
-        return 100
-    if days_left == 1:
-        return 90
-    if days_left == 2:
-        return 80
-    if days_left == 3:
-        return 70
-    if days_left <= 7:
-        return 50
-    if days_left <= 14:
-        return 30
-    return 10
-
-
 def importance_score(importance: str) -> int:
     """백엔드 중요도 문자열을 추천 계산용 점수로 변환한다."""
 
@@ -228,7 +201,6 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
 
     due_day = _to_date(task.dueDate)
     is_due_today = due_day == target_date
-    task_deadline_score = deadline_score(due_day, target_date)
     task_workload_urgency_score = workload_urgency_score(
         remaining_minutes,
         due_day,
@@ -246,7 +218,6 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         due_date=due_day,
         remaining_minutes=remaining_minutes,
         recommend_score=recommend_score,
-        deadline_score=task_deadline_score,
         workload_urgency_score=task_workload_urgency_score,
         importance_score=task_importance_score,
         is_due_today=is_due_today,
@@ -294,7 +265,6 @@ def _to_recommended_task(
         name=candidate.task.name,
         remainingMin=candidate.remaining_minutes,
         recommendScore=candidate.recommend_score,
-        deadlineScore=candidate.deadline_score,
         workloadUrgencyScore=candidate.workload_urgency_score,
         importanceScore=candidate.importance_score,
         isDueToday=candidate.is_due_today,
@@ -425,7 +395,7 @@ def _reason(
     time_band_focus_scores: dict[str, int],
 ) -> str:
     reasons = [
-        _deadline_reason(candidate),
+        _workload_urgency_reason(candidate),
         _importance_reason(candidate),
         _time_band_reason(candidate, recommended_time_band, time_band_focus_scores),
         _remaining_time_reason(candidate),
@@ -435,17 +405,17 @@ def _reason(
     return " ".join(selected_reasons[:3])
 
 
-def _deadline_reason(candidate: _ScoredTask) -> str | None:
-    if candidate.is_due_today:
-        return "오늘 마감 태스크라 우선 추천되었습니다."
-    if candidate.deadline_score >= 90:
-        return "마감이 매우 임박해 추천 우선순위가 높습니다."
-    if candidate.deadline_score >= 70:
-        return "마감이 가까워 미리 진행하는 것이 좋습니다."
-    if candidate.deadline_score >= 50:
-        return "일주일 이내 마감 예정이라 추천 후보에 포함되었습니다."
-    if candidate.deadline_score <= 10:
-        return "마감까지는 여유가 있지만 다른 조건을 함께 고려해 추천되었습니다."
+def _workload_urgency_reason(candidate: _ScoredTask) -> str | None:
+    if candidate.workload_urgency_score >= 100:
+        return "남은 기간 대비 작업량 압박이 매우 커 우선 추천되었습니다."
+    if candidate.workload_urgency_score >= 85:
+        return "마감까지 소화해야 할 작업량이 많아 우선순위가 높습니다."
+    if candidate.workload_urgency_score >= 70:
+        return "남은 기간 대비 작업량 부담이 커 미리 진행하는 것이 좋습니다."
+    if candidate.workload_urgency_score >= 50:
+        return "오늘 일정에 포함할 만큼 작업량 압박이 있습니다."
+    if candidate.workload_urgency_score >= 30:
+        return "작업량을 나누어 진행하기 위해 추천되었습니다."
     return None
 
 

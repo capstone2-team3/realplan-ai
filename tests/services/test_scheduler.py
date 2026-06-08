@@ -5,7 +5,6 @@ import pytest
 from app.services.task_recommendation.scheduler import (
     CandidateTask,
     RecommendInput,
-    deadline_score,
     filter_available_time_bands,
     importance_score,
     recommend_tasks,
@@ -98,7 +97,6 @@ def test_overdue_task_is_classified_as_general_task():
     due_today = next(item for item in response.recommendations if item.taskId == 2)
 
     assert overdue.isDueToday is False
-    assert overdue.deadlineScore == 20
     assert overdue.deadlineLabel == "D+1"
     assert due_today.isDueToday is True
 
@@ -140,11 +138,10 @@ def test_task_larger_than_available_minutes_is_recommended_without_time_allocati
     assert item.recommendedTimeBandLabel == "06-12시"
 
 
-def test_null_due_date_uses_low_deadline_score():
+def test_null_due_date_uses_no_deadline_label_and_low_workload_urgency():
     response = _recommend([_task(1, due_date=None, importance="high")])
 
     item = response.recommendations[0]
-    assert item.deadlineScore == 5
     assert item.workloadUrgencyScore == 10
     assert item.deadlineLabel == "마감 없음"
 
@@ -323,14 +320,13 @@ def test_urgent_medium_focus_task_uses_focus_fit_time_band():
     )
 
     item = response.recommendations[0]
-    assert item.deadlineScore == 80
     assert item.requiredFocusLevel == "MEDIUM"
     assert item.recommendedTimeBand == "06-12"
     assert item.reason == (
-        "마감이 가까워 미리 진행하는 것이 좋습니다. "
         "중요도가 보통 수준으로 추천 점수에 반영되었습니다. "
         "사용자의 해당 시간대 평균 집중도(85점)가 "
-        "태스크 요구 집중도와 잘 맞아 이 시간대를 추천했습니다."
+        "태스크 요구 집중도와 잘 맞아 이 시간대를 추천했습니다. "
+        "남은 시간이 비교적 적어 오늘 일정에 포함하기 적합합니다."
     )
 
 
@@ -338,18 +334,6 @@ def test_importance_scores_are_calculated_case_insensitively():
     assert importance_score("HIGH") == 100
     assert importance_score("medium") == 60
     assert importance_score("Low") == 30
-
-
-def test_deadline_score_policy():
-    assert deadline_score(date(2026, 5, 28), TARGET_DATE) == 20
-    assert deadline_score(TARGET_DATE, TARGET_DATE) == 100
-    assert deadline_score(date(2026, 5, 30), TARGET_DATE) == 90
-    assert deadline_score(date(2026, 5, 31), TARGET_DATE) == 80
-    assert deadline_score(date(2026, 6, 1), TARGET_DATE) == 70
-    assert deadline_score(date(2026, 6, 5), TARGET_DATE) == 50
-    assert deadline_score(date(2026, 6, 12), TARGET_DATE) == 30
-    assert deadline_score(date(2026, 6, 20), TARGET_DATE) == 10
-    assert deadline_score(None, TARGET_DATE) == 5
 
 
 def test_workload_urgency_score_policy():
@@ -370,7 +354,6 @@ def test_recommend_score_uses_workload_urgency_and_importance():
     )
 
     item = response.recommendations[0]
-    assert item.deadlineScore == 100
     assert item.workloadUrgencyScore == 50
     assert item.importanceScore == 100
     assert item.recommendScore == 65.0
