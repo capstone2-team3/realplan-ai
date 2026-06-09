@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+nayoung_exp02_blending_only,5,5,-169.05,172.78,38.74,2.28,2.28,1.03,170.5,98.68,37.71

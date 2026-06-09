@@ -6,7 +6,8 @@ RealPlan 원본 서비스 코드 호출 기반 시뮬레이션 드라이버
 - 세션 종료 시: estimate_remaining 호출
 - 태스크 완료 시: update_coefficients 호출
 - CSV 기반으로 초기 예측 / 잔여시간 재예측 / 보정값 업데이트를 순차 실행
-- 최종 user_ai_* 보정값을 seed SQL에 반영할 수 있도록 출력
+- 진행률 100% 세션의 종료 시각을 기준으로 태스크 학습 순서를 정렬
+- metrics_summary.csv와 그래프 PNG를 출력
 
 실행 위치
 - realplan-ai 프로젝트 루트에서 실행
@@ -14,9 +15,13 @@ RealPlan 원본 서비스 코드 호출 기반 시뮬레이션 드라이버
 
 예시 실행
     uv run python realplan_estimate_and_update_simulation.py \
-        --data-dir ./data/realplan-demo \
-        --output-dir ./data/realplan-demo-output/sejin \
-        --experiment-name sejin_dummy_30
+        --data-dir ./simulation/test/data \
+        --output-dir ./simulation/test/output/sejin_baseline \
+        --experiment-name sejin_baseline \
+        --user-id 1 \
+        --user-name 세진 \
+        --tasks-file sejin_tasks_completed.csv \
+        --sessions-file sejin_sessions_completed_filled.csv
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ import json
 import math
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -55,12 +61,27 @@ except ModuleNotFoundError as exc:
 
 # -----------------------------------------------------------------------------
 # 2. 시스템 prior/effect 설정
+#    baseline은 모두 0.0으로 둔다. 실험별로 이 값만 변경하면 된다.
 # -----------------------------------------------------------------------------
 
-SYSTEM_GLOBAL_PRIOR = math.log(1.56)  # 약 0.4447
+# SYSTEM_GLOBAL_PRIOR = 0.0
+
+# SYSTEM_TYPE_EFFECT = {
+#     "TIME_BASED": 0.0,
+#     "QUANTITY_BASED": 0.0,
+#     "SATISFACTION_BASED": 0.0,
+# }
+
+# SYSTEM_DIFFICULTY_EFFECT = {
+#     "LOW": 0.0,
+#     "MEDIUM": 0.0,
+#     "HIGH": 0.0,
+#     "UNKNOWN": 0.0,
+# }
+SYSTEM_GLOBAL_PRIOR = 0.4447
 
 SYSTEM_TYPE_EFFECT = {
-    "TIME_BASED": 0.0,
+    "TIME_BASED": 0.000,
     "QUANTITY_BASED": -0.071,
     "SATISFACTION_BASED": 0.262,
 }
@@ -108,8 +129,9 @@ FOCUS_MAP = {
     "VERY_HIGH": "VERY_HIGH",
 }
 
-# user_id = 1 기준 seed에서 사용할 폴더 ID 가정
-# 실제 DB에서 폴더 id가 다르면 이 값만 수정하면 됨.
+# user_id = 1 기준 seed에서 사용할 폴더 ID 가정.
+# CSV에 폴더 열이 없으면 기본 폴더로 처리한다.
+# 실제 DB에서 폴더 id가 다르면 이 값만 수정하면 된다.
 FOLDER_ID_MAP = {
     "기본 폴더": "1",
     "테스트 폴더": "2",
@@ -126,6 +148,7 @@ Row = dict[str, Any]
 TASK_RESULT_FIELDS = [
     "user_name",
     "task_id",
+    "completed_at",
     "title",
     "folder_raw",
     "folder_id",
@@ -162,6 +185,8 @@ SESSION_RESULT_FIELDS = [
     "task_id",
     "task_title",
     "session_order",
+    "started_at",
+    "ended_at",
     "session_elapsed_minutes",
     "elapsed_minutes",
     "progress_percent",
@@ -316,10 +341,45 @@ def to_float(value: Any) -> float | None:
         return None
 
 
+def to_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if text == "":
+        return None
+
+    formats = [
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y.%m.%d %H:%M",
+        "%Y.%m.%d %H:%M:%S",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            pass
+
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def datetime_to_text(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ", timespec="minutes")
+    return clean_text(value)
+
+
 def read_realplan_csv(path: Path) -> list[Row]:
     """
     기존 원본 CSV는 0행 설명 / 1행 컬럼명 구조였고,
-    새로 만든 더미 CSV는 0행부터 컬럼명일 수도 있으므로 둘 다 지원한다.
+    새로 만든 CSV는 0행부터 컬럼명일 수도 있으므로 둘 다 지원한다.
     """
     with path.open(newline="", encoding="utf-8-sig") as file:
         all_rows = list(csv.reader(file))
@@ -330,7 +390,14 @@ def read_realplan_csv(path: Path) -> list[Row]:
     first_row = [col.strip() for col in all_rows[0]]
     second_row = [col.strip() for col in all_rows[1]] if len(all_rows) > 1 else []
 
-    known_headers = {"태스크 ID", "태스크 이름", "세션 번호", "진행률(%)"}
+    known_headers = {
+        "태스크 ID",
+        "태스크 이름",
+        "세션 번호",
+        "세션 순서",
+        "진행률(%)",
+        "본인 예상 소요시간(분)",
+    }
 
     if any(col in known_headers for col in first_row):
         headers = first_row
@@ -404,6 +471,7 @@ def normalize_tasks(raw_rows: list[Row], user_id: int, user_name: str) -> list[R
                 "user_id": user_id,
                 "user_name": user_name,
                 "task_id": int(task_id_value),
+                "completed_at": "",
                 "title": pick_first(row, ["태스크 이름", "title", "task_title"]),
                 "folder_raw": folder_raw,
                 "folder_id": folder_id,
@@ -417,7 +485,7 @@ def normalize_tasks(raw_rows: list[Row], user_id: int, user_name: str) -> list[R
             }
         )
 
-    return sorted(rows, key=lambda item: item["task_id"])
+    return rows
 
 
 def normalize_sessions(
@@ -451,9 +519,16 @@ def normalize_sessions(
         if focus_level is None:
             raise ValueError(f"알 수 없는 집중도입니다: {focus_raw}")
 
-        session_order = to_float(pick_first(row, ["세션 번호", "session_order"]))
+        session_order = to_float(pick_first(row, ["세션 번호", "세션 순서", "session_order"]))
         if session_order is None:
             session_order = 0
+
+        started_at = to_datetime(
+            pick_first(row, ["시작 시각", "시작 시간", "started_at", "start_time"])
+        )
+        ended_at = to_datetime(
+            pick_first(row, ["중단 시각", "종료 시각", "종료 시간", "ended_at", "end_time"])
+        )
 
         rows.append(
             {
@@ -461,6 +536,8 @@ def normalize_sessions(
                 "user_name": user_name,
                 "task_id": task_id,
                 "session_order": int(session_order),
+                "started_at": started_at,
+                "ended_at": ended_at,
                 "elapsed_minutes": elapsed,
                 "progress_percent": progress_percent,
                 "progress": min(progress_percent / 100.0, 1.0),
@@ -470,6 +547,51 @@ def normalize_sessions(
         )
 
     return sorted(rows, key=lambda item: (item["task_id"], item["session_order"]))
+
+
+def get_task_completed_at_map(sessions: list[Row]) -> dict[int, datetime]:
+    """각 태스크가 처음 progress 100%에 도달한 세션의 종료 시각을 완료 시점으로 사용한다."""
+    completed_at_by_task: dict[int, datetime] = {}
+
+    for session in sessions:
+        if float(session["progress_percent"]) < 100.0:
+            continue
+
+        ended_at = session.get("ended_at")
+        if not isinstance(ended_at, datetime):
+            continue
+
+        task_id = int(session["task_id"])
+        previous = completed_at_by_task.get(task_id)
+        if previous is None or ended_at < previous:
+            completed_at_by_task[task_id] = ended_at
+
+    return completed_at_by_task
+
+
+def sort_tasks_by_completed_at(tasks: list[Row], sessions: list[Row]) -> list[Row]:
+    """태스크를 실제 완료 시점 기준으로 정렬한다.
+
+    완료 시점은 progress 100% 세션의 종료 시각으로 판단한다.
+    완료 시점을 찾지 못한 태스크는 뒤로 보내고 task_id로 정렬한다.
+    """
+    completed_at_by_task = get_task_completed_at_map(sessions)
+
+    def sort_key(task: Row) -> tuple[int, datetime, int]:
+        task_id = int(task["task_id"])
+        completed_at = completed_at_by_task.get(task_id)
+        if completed_at is None:
+            return (1, datetime.max, task_id)
+        return (0, completed_at, task_id)
+
+    sorted_tasks = sorted(tasks, key=sort_key)
+
+    for task in sorted_tasks:
+        task_id = int(task["task_id"])
+        completed_at = completed_at_by_task.get(task_id)
+        task["completed_at"] = datetime_to_text(completed_at) if completed_at else ""
+
+    return sorted_tasks
 
 
 # -----------------------------------------------------------------------------
@@ -541,6 +663,9 @@ def simulate_user(
         {int(task["task_id"]) for task in tasks},
     )
 
+    # 중요: task_id 순서가 아니라 실제 완료 시점 기준으로 학습 순서를 맞춘다.
+    tasks = sort_tasks_by_completed_at(tasks, sessions)
+
     profile = UserProfile()
 
     task_rows: list[Row] = []
@@ -601,6 +726,8 @@ def simulate_user(
                     "task_id": task_id,
                     "task_title": task["title"],
                     "session_order": int(session["session_order"]),
+                    "started_at": datetime_to_text(session.get("started_at")),
+                    "ended_at": datetime_to_text(session.get("ended_at")),
                     "session_elapsed_minutes": round(float(session["elapsed_minutes"]), 2),
                     "elapsed_minutes": round(cumulative_elapsed, 2),
                     "progress_percent": round(float(session["progress_percent"]), 2),
@@ -654,6 +781,7 @@ def simulate_user(
             {
                 "user_name": user_name,
                 "task_id": task_id,
+                "completed_at": task.get("completed_at", ""),
                 "title": task["title"],
                 "folder_raw": task["folder_raw"],
                 "folder_id": task["folder_id"],
@@ -721,7 +849,7 @@ def simulate_user(
 
 
 # -----------------------------------------------------------------------------
-# 8. 지표 계산
+# 8. 지표 계산 및 그래프 저장
 # -----------------------------------------------------------------------------
 
 def _mean(values: list[float]) -> float:
@@ -747,21 +875,177 @@ def _metric_from_rows(rows: list[Row]) -> dict[str, float | int]:
 
 
 def _last_session_rows(timeline_rows: list[Row]) -> list[Row]:
-    last_by_task: dict[int, Row] = {}
+    last_by_task: dict[tuple[str, int], Row] = {}
 
     for row in timeline_rows:
         if row.get("prediction_step") != "SESSION_REESTIMATE":
             continue
 
-        task_id = int(row["task_id"])
+        key = (str(row.get("user_name", "")), int(row["task_id"]))
         current_order = int(row.get("session_order") or 0)
-        previous = last_by_task.get(task_id)
+        previous = last_by_task.get(key)
         previous_order = int(previous.get("session_order") or 0) if previous else -1
 
         if previous is None or current_order >= previous_order:
-            last_by_task[task_id] = row
+            last_by_task[key] = row
 
     return list(last_by_task.values())
+
+
+def save_initial_error_by_task_graph(
+    *,
+    task_rows: list[Row],
+    output_dir: Path,
+    experiment_name: str,
+) -> None:
+    """진행률 100% 도달 시점 순서대로 태스크별 초기 예측 오차 그래프를 저장한다."""
+
+    if not task_rows:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        print("\nmatplotlib가 없어 태스크별 초기 예측 오차 그래프를 저장하지 않았습니다.")
+        print("설치 명령어: uv add matplotlib")
+        return
+
+    labels: list[str] = []
+    errors: list[float] = []
+    absolute_errors: list[float] = []
+
+    for index, row in enumerate(task_rows, start=1):
+        task_id = row["task_id"]
+        predicted = float(row["ai_estimated_minutes_at_registration"])
+        actual = float(row["actual_minutes"])
+
+        error = predicted - actual
+        absolute_error = abs(error)
+
+        # 한글 태스크명은 matplotlib 폰트 이슈가 생길 수 있어 task_id 중심으로 표시
+        labels.append(f"{index}\nT{task_id}")
+        errors.append(round(error, 2))
+        absolute_errors.append(round(absolute_error, 2))
+
+    plt.figure(figsize=(max(8, len(labels) * 0.7), 5))
+
+    bars = plt.bar(labels, absolute_errors)
+
+    for bar, signed_error in zip(bars, errors):
+        height = bar.get_height()
+        sign = "+" if signed_error > 0 else ""
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            height,
+            f"{height:.1f}\n({sign}{signed_error:.1f})",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+
+    plt.title(f"Initial prediction error by task - {experiment_name}")
+    plt.xlabel("Completion order by progress 100% session")
+    plt.ylabel("Absolute error (minutes)")
+    plt.ylim(0, max(absolute_errors) * 1.25 if absolute_errors else 1)
+    plt.tight_layout()
+
+    path = output_dir / "initial_error_by_task.png"
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+    print(path)
+
+def save_metrics_graphs(
+    *,
+    summary_rows: list[Row],
+    timeline_rows: list[Row],
+    output_dir: Path,
+) -> None:
+    """matplotlib이 설치된 경우 실험 지표 그래프를 PNG로 저장한다."""
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        print("\nmatplotlib이 설치되어 있지 않아 그래프 저장을 건너뜁니다.")
+        print("그래프가 필요하면 `uv add matplotlib`을 실행하세요.")
+        return
+    
+    def add_bar_labels(bars, *, suffix: str = "") -> None:
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(
+                bar.get_x() + bar.get_width() / 2,
+                height,
+                f"{height:.2f}{suffix}",
+                ha="center",
+                va="bottom",
+                fontsize=10,
+            )
+
+    if not summary_rows:
+        return
+
+    summary = summary_rows[0]
+
+    # 그래프 1: MAE 비교
+    labels = ["Initial estimate", "Last session"]
+    mae_values = [float(summary["initial_mae"]), float(summary["last_mae"])]
+
+    plt.figure(figsize=(7, 5))
+    bars = plt.bar(labels, mae_values)
+    add_bar_labels(bars)
+    plt.title(f"MAE comparison - {summary['experiment']}")
+    plt.ylabel("MAE (minutes)")
+    plt.ylim(0, max(mae_values) * 1.15)
+    plt.tight_layout()
+    mae_path = output_dir / "metrics_mae_comparison.png"
+    plt.savefig(mae_path, dpi=200)
+    plt.close()
+
+    # 그래프 2: MAPE 비교
+    mape_values = [float(summary["initial_mape"]), float(summary["last_mape"])]
+
+    plt.figure(figsize=(7, 5))
+    bars = plt.bar(labels, mape_values)
+    add_bar_labels(bars, suffix="%")
+    plt.title(f"MAPE comparison - {summary['experiment']}")
+    plt.ylabel("MAPE (%)")
+    plt.ylim(0, max(mape_values) * 1.15)
+    plt.tight_layout()
+    mape_path = output_dir / "metrics_mape_comparison.png"
+    plt.savefig(mape_path, dpi=200)
+    plt.close()
+
+    # 그래프 3: 태스크별 예측 오차 변화
+    grouped: dict[int, list[Row]] = {}
+    for row in timeline_rows:
+        grouped.setdefault(int(row["task_id"]), []).append(row)
+
+    plt.figure(figsize=(10, 6))
+    for task_id, rows in sorted(grouped.items()):
+        rows = sorted(
+            rows,
+            key=lambda row: -1
+            if row.get("prediction_step") == "INITIAL_ESTIMATE"
+            else int(row.get("session_order") or 0),
+        )
+        x_values = list(range(len(rows)))
+        y_values = [float(row["absolute_error_minutes"]) for row in rows]
+        label = f"Task {task_id}"
+        plt.plot(x_values, y_values, marker="o", label=label)
+
+    plt.title("Prediction absolute error over sessions")
+    plt.xlabel("Prediction step (0 = initial estimate)")
+    plt.ylabel("Absolute error (minutes)")
+    plt.legend(fontsize=8, ncol=2)
+    plt.tight_layout()
+    timeline_path = output_dir / "prediction_error_timeline.png"
+    plt.savefig(timeline_path, dpi=200)
+    plt.close()
+
+    print("\n=== 그래프 저장 완료 ===")
+    print(mae_path)
+    print(mape_path)
+    print(timeline_path)
 
 
 def compute_and_save_metrics(
@@ -808,6 +1092,8 @@ def compute_and_save_metrics(
     print("\n=== 예측 정확도 비교 지표 ===")
     print_table(rows, METRICS_SUMMARY_FIELDS)
 
+    save_metrics_graphs(summary_rows=rows, timeline_rows=timeline_rows, output_dir=output_dir)
+
     return rows
 
 
@@ -848,9 +1134,9 @@ def save_final_profile_json(output_dir: Path, profile_rows: list[Row]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--data-dir", type=Path, default=Path("."))
-    parser.add_argument("--output-dir", type=Path, default=Path("./realplan_simulation_output"))
-    parser.add_argument("--experiment-name", type=str, default="sejin_dummy_30")
+    parser.add_argument("--data-dir", type=Path, default=Path("./simulation/test/data"))
+    parser.add_argument("--output-dir", type=Path, default=Path("./simulation/test/output"))
+    parser.add_argument("--experiment-name", type=str, default="baseline")
 
     parser.add_argument("--user-id", type=int, default=1)
     parser.add_argument("--user-name", type=str, default="세진")
@@ -858,17 +1144,89 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tasks-file",
         type=str,
-        default="sejin_demo_completed_tasks_30.csv",
+        default="sejin_tasks_completed.csv",
         help="data-dir 기준 완료 태스크 CSV 파일명",
     )
     parser.add_argument(
         "--sessions-file",
         type=str,
-        default="sejin_demo_sessions_for_30_completed_tasks.csv",
+        default="sejin_sessions_completed_filled.csv",
         help="data-dir 기준 세션 CSV 파일명",
     )
 
     return parser.parse_args()
+
+def save_initial_prediction_vs_actual_graph(
+    *,
+    task_rows: list[Row],
+    output_dir: Path,
+    experiment_name: str,
+) -> None:
+    """진행률 100% 도달 시점 순서대로 태스크별 초기 예측값과 실제 소요시간을 비교한다."""
+
+    if not task_rows:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except ModuleNotFoundError:
+        print("\nmatplotlib가 없어 초기 예측/실제 비교 그래프를 저장하지 않았습니다.")
+        print("설치 명령어: uv add matplotlib")
+        return
+
+    labels: list[str] = []
+    predicted_values: list[float] = []
+    actual_values: list[float] = []
+
+    for index, row in enumerate(task_rows, start=1):
+        task_id = row["task_id"]
+        labels.append(f"{index}\nT{task_id}")
+        predicted_values.append(float(row["ai_estimated_minutes_at_registration"]))
+        actual_values.append(float(row["actual_minutes"]))
+
+    x = list(range(len(labels)))
+    width = 0.38
+
+    plt.figure(figsize=(max(8, len(labels) * 0.75), 5))
+
+    predicted_bars = plt.bar(
+        [value - width / 2 for value in x],
+        predicted_values,
+        width,
+        label="Initial estimate",
+    )
+    actual_bars = plt.bar(
+        [value + width / 2 for value in x],
+        actual_values,
+        width,
+        label="Actual",
+    )
+
+    for bars in [predicted_bars, actual_bars]:
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(
+                bar.get_x() + bar.get_width() / 2,
+                height,
+                f"{height:.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    plt.title(f"Initial estimate vs actual by task - {experiment_name}")
+    plt.xlabel("Completion order by progress 100% session")
+    plt.ylabel("Minutes")
+    plt.xticks(x, labels)
+    plt.ylim(0, max(predicted_values + actual_values) * 1.18)
+    plt.legend()
+    plt.tight_layout()
+
+    path = output_dir / "initial_estimate_vs_actual_by_task.png"
+    plt.savefig(path, dpi=200)
+    plt.close()
+
+    print(path)
 
 
 def main() -> None:
@@ -911,6 +1269,7 @@ def main() -> None:
 
     preview_cols = [
         "task_id",
+        "completed_at",
         "title",
         "folder_raw",
         "estimated_minutes_user",
@@ -956,6 +1315,7 @@ def main() -> None:
         "system_type_effect": SYSTEM_TYPE_EFFECT,
         "system_difficulty_effect": SYSTEM_DIFFICULTY_EFFECT,
         "folder_id_map": FOLDER_ID_MAP,
+        "task_order_basis": "first session with progress_percent >= 100, ordered by ended_at",
     }
 
     with (output_dir / "experiment_metadata.json").open("w", encoding="utf-8") as file:
@@ -963,6 +1323,16 @@ def main() -> None:
 
     compute_and_save_metrics(
         timeline_rows=timeline_rows,
+        output_dir=output_dir,
+        experiment_name=args.experiment_name,
+    )
+    save_initial_error_by_task_graph(
+        task_rows=task_rows,
+        output_dir=output_dir,
+        experiment_name=args.experiment_name,
+    )
+    save_initial_prediction_vs_actual_graph(
+        task_rows=task_rows,
         output_dir=output_dir,
         experiment_name=args.experiment_name,
     )
@@ -975,8 +1345,13 @@ def main() -> None:
     print(output_dir / "profile_history_results.csv")
     print(output_dir / "prediction_timeline_results.csv")
     print(output_dir / "metrics_summary.csv")
+    print(output_dir / "initial_error_by_task.png")
     print(output_dir / "final_user_ai_profile.json")
     print(output_dir / "experiment_metadata.json")
+    print(output_dir / "metrics_mae_comparison.png")
+    print(output_dir / "metrics_mape_comparison.png")
+    print(output_dir / "prediction_error_timeline.png")
+    print(output_dir / "initial_estimate_vs_actual_by_task.png")
 
 
 if __name__ == "__main__":

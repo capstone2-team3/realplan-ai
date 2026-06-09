@@ -1,0 +1,30 @@
+{
+  "completed_count": 11,
+  "user_global": 0.472449,
+  "user_type_residual": {
+    "QUANTITY_BASED": 0.2789570409246236,
+    "SATISFACTION_BASED": 0.1861283298422121
+  },
+  "user_difficulty_residual": {
+    "UNKNOWN": 0.15532369087476305,
+    "MEDIUM": 0.2218787121143868,
+    "LOW": 0.03760010815628169,
+    "HIGH": -0.01072401638414576
+  },
+  "user_folder_residual": {
+    "1": 0.29780027044736246
+  },
+  "type_count": {
+    "QUANTITY_BASED": 9,
+    "SATISFACTION_BASED": 2
+  },
+  "difficulty_count": {
+    "UNKNOWN": 3,
+    "MEDIUM": 5,
+    "LOW": 2,
+    "HIGH": 1
+  },
+  "folder_count": {
+    "1": 11
+  }
+}
