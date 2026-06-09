@@ -174,7 +174,7 @@ def workload_urgency_score(
 
     days_left = (due_day - target_date).days
     if days_left < 0:
-        return 100
+        return 20
 
     available_days = max(days_left + 1, 1)
     daily_required_minutes = remaining_minutes / available_days

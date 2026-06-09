@@ -338,7 +338,7 @@ def test_importance_scores_are_calculated_case_insensitively():
 
 def test_workload_urgency_score_policy():
     assert workload_urgency_score(60, None, TARGET_DATE) == 10
-    assert workload_urgency_score(60, date(2026, 5, 28), TARGET_DATE) == 100
+    assert workload_urgency_score(60, date(2026, 5, 28), TARGET_DATE) == 20
     assert workload_urgency_score(240, TARGET_DATE, TARGET_DATE) == 100
     assert workload_urgency_score(180, TARGET_DATE, TARGET_DATE) == 85
     assert workload_urgency_score(120, TARGET_DATE, TARGET_DATE) == 70
