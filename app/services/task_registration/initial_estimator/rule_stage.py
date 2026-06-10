@@ -8,6 +8,11 @@ from app.schemas.estimate import EstimateRequest, EstimateResponse
 from app.schemas.update import UpdateRequest, UpdateResponse
 from app.services.task_registration.initial_estimator.base import PlanningStage
 from app.services.task_registration.initial_estimator.constants import STAGE_RULE
+from app.services.task_registration.initial_estimator.time_based_policy import (
+    estimate_time_based,
+    is_time_based,
+    update_time_based,
+)
 from app.services.task_registration.initial_estimator.update_policy import (
     clamp_log_ratio,
     compute_log_ratio,
@@ -22,6 +27,9 @@ class RuleStage(PlanningStage):
     """systemGlobalPrior, type effect, difficulty effect만 사용하는 stage."""
 
     def estimate(self, req: EstimateRequest) -> EstimateResponse:
+        if is_time_based(req.taskType):
+            return estimate_time_based(req, stage_label=STAGE_RULE)
+
         validate_estimated_minutes(req.estimatedMinutes)
 
         log_correction = (
@@ -39,6 +47,9 @@ class RuleStage(PlanningStage):
         )
 
     def update(self, req: UpdateRequest) -> UpdateResponse:
+        if is_time_based(req.taskType):
+            return update_time_based(req, stage_label=STAGE_RULE)
+
         validate_update_minutes(req.estimatedMinutes, req.actualMinutes)
         ratio = compute_ratio(req.estimatedMinutes, req.actualMinutes)
         log_ratio = compute_log_ratio(ratio)

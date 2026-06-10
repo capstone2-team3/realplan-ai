@@ -32,6 +32,7 @@ from app.services.task_registration.initial_estimator.average_stage import Avera
 from app.services.task_registration.initial_estimator.router import PlanningRouter
 from app.services.task_registration.initial_estimator.rule_stage import RuleStage
 from app.services.task_registration.initial_estimator.training_record import build_initial_training_record
+from app.services.task_registration.initial_estimator.update_policy import clamp_log_ratio
 
 
 SYSTEM_GLOBAL = 0.1
@@ -167,6 +168,67 @@ def test_average_stage_ignores_folder_residual_when_folder_is_missing():
     assert math.isclose(without_folder.logCorrection, empty_folder.logCorrection, rel_tol=1e-9)
 
 
+@pytest.mark.parametrize("stage", [RuleStage(), AverageBaselineStage()])
+def test_time_based_estimate_defaults_to_factor_one(stage):
+    """TIME_BASED 초기 데이터 없음: 신규 사용자 기본 3% 보정을 적용한다."""
+    req = _make_estimate_request(
+        estimatedMinutes=80.0,
+        taskType="TIME_BASED",
+        difficulty="HIGH",
+        userGlobal=99.0,
+        userTypeResidual={"TIME_BASED": 0.0},
+        userDifficultyResidual={"HIGH": 99.0},
+        userFolderResidual={"folder-1": 99.0},
+        typeCount={"TIME_BASED": 0},
+        difficultyCount={"HIGH": 99},
+        folderCount={"folder-1": 99},
+        systemGlobalPrior=99.0,
+        systemTypeEffect={"TIME_BASED": 99.0},
+        systemDifficultyEffect={"HIGH": 99.0},
+    )
+    result = stage.estimate(req)
+
+    assert result.correctionFactor == 1.03
+    assert math.isclose(result.logCorrection, math.log(1.03), rel_tol=1e-9)
+    assert result.aiEstimatedMinutes == 80.0 * 1.03
+    assert result.stage in {STAGE_RULE, STAGE_AVERAGE_BASELINE}
+
+
+def test_time_based_estimate_positive_residual_is_capped():
+    stage = AverageBaselineStage()
+    req = _make_estimate_request(
+        estimatedMinutes=100.0,
+        taskType="TIME_BASED",
+        userTypeResidual={"TIME_BASED": math.log(2.0)},
+        typeCount={"TIME_BASED": 100},
+    )
+    result = stage.estimate(req)
+
+    assert result.correctionFactor > 1.0
+    assert result.correctionFactor <= 1.2
+    assert math.isclose(result.correctionFactor, math.exp(result.logCorrection), rel_tol=1e-9)
+    assert math.isclose(
+        result.aiEstimatedMinutes,
+        req.estimatedMinutes * result.correctionFactor,
+        rel_tol=1e-9,
+    )
+
+
+def test_time_based_estimate_negative_residual_is_floored():
+    stage = AverageBaselineStage()
+    req = _make_estimate_request(
+        estimatedMinutes=100.0,
+        taskType="TIME_BASED",
+        userTypeResidual={"TIME_BASED": -1.0},
+        typeCount={"TIME_BASED": 100},
+    )
+    result = stage.estimate(req)
+
+    assert result.correctionFactor == 1.0
+    assert result.logCorrection == 0.0
+    assert result.aiEstimatedMinutes == 100.0
+
+
 # ---------- update -----------------------------------------------------
 
 
@@ -289,6 +351,67 @@ def test_update_invalid_minutes_raise():
         stage.update(_make_update_request(estimatedMinutes=0))
     with pytest.raises(Exception):
         stage.update(_make_update_request(actualMinutes=0))
+
+
+@pytest.mark.parametrize("stage", [RuleStage(), AverageBaselineStage()])
+def test_time_based_update_only_updates_type_residual_and_count(stage):
+    """TIME_BASED update는 type residual/count 외 사용자 계수를 그대로 보존한다."""
+    req = _make_update_request(
+        estimatedMinutes=60.0,
+        actualMinutes=90.0,
+        taskType="TIME_BASED",
+        difficulty="HIGH",
+        folderId="folder-1",
+        userGlobal=0.55,
+        userTypeResidual={"TIME_BASED": 0.2, "SATISFACTION_BASED": -0.1},
+        userDifficultyResidual={"HIGH": 0.3},
+        userFolderResidual={"folder-1": 0.4},
+        typeCount={"TIME_BASED": 7, "SATISFACTION_BASED": 2},
+        difficultyCount={"HIGH": 5},
+        folderCount={"folder-1": 6},
+    )
+    result = stage.update(req)
+
+    clamped = clamp_log_ratio(math.log(90.0 / 60.0))
+    expected_time_residual = (1 - ETA_TYPE) * 0.2 + ETA_TYPE * clamped
+
+    assert result.userGlobal == 0.55
+    assert math.isclose(
+        result.userTypeResidual["TIME_BASED"],
+        expected_time_residual,
+        rel_tol=1e-9,
+    )
+    assert result.userTypeResidual["SATISFACTION_BASED"] == -0.1
+    assert result.typeCount == {"TIME_BASED": 8, "SATISFACTION_BASED": 2}
+    assert result.userDifficultyResidual == {"HIGH": 0.3}
+    assert result.userFolderResidual == {"folder-1": 0.4}
+    assert result.difficultyCount == {"HIGH": 5}
+    assert result.folderCount == {"folder-1": 6}
+    assert result.dropped is False
+
+
+def test_time_based_update_drop_keeps_existing_values():
+    stage = AverageBaselineStage()
+    req = _make_update_request(
+        estimatedMinutes=100.0,
+        actualMinutes=900.0,
+        taskType="TIME_BASED",
+        userGlobal=None,
+        userTypeResidual={"TIME_BASED": 0.2},
+        typeCount={"TIME_BASED": 7},
+        difficultyCount={"MEDIUM": 3},
+        folderCount={"folder-1": 4},
+    )
+    result = stage.update(req)
+
+    assert result.dropped is True
+    assert result.userGlobal == SYSTEM_GLOBAL
+    assert result.userTypeResidual == {"TIME_BASED": 0.2}
+    assert result.typeCount == {"TIME_BASED": 7}
+    assert result.difficultyCount == {"MEDIUM": 3}
+    assert result.folderCount == {"folder-1": 4}
+    assert math.isclose(result.logRatio, math.log(9.0), rel_tol=1e-9)
+    assert math.isclose(result.clampedLogRatio, CLAMP_MAX, rel_tol=1e-9)
 
 
 # ---------- drop -------------------------------------------------------

@@ -19,6 +19,11 @@ from app.services.task_registration.initial_estimator.constants import (
     TYPE_SHRINKAGE_N,
     USER_GLOBAL_SHRINKAGE_N,
 )
+from app.services.task_registration.initial_estimator.time_based_policy import (
+    estimate_time_based,
+    is_time_based,
+    update_time_based,
+)
 from app.services.task_registration.initial_estimator.update_policy import (
     clamp_log_ratio,
     compute_log_ratio,
@@ -37,6 +42,9 @@ class AverageBaselineStage(PlanningStage):
     stage_label = STAGE_AVERAGE_BASELINE
 
     def estimate(self, req: EstimateRequest) -> EstimateResponse:
+        if is_time_based(req.taskType):
+            return estimate_time_based(req, stage_label=self.stage_label)
+
         validate_estimated_minutes(req.estimatedMinutes)
 
         user_weight = req.completedCount / (
@@ -94,6 +102,9 @@ class AverageBaselineStage(PlanningStage):
         )
 
     def update(self, req: UpdateRequest) -> UpdateResponse:
+        if is_time_based(req.taskType):
+            return update_time_based(req, stage_label=self.stage_label)
+
         validate_update_minutes(req.estimatedMinutes, req.actualMinutes)
 
         ratio = compute_ratio(req.estimatedMinutes, req.actualMinutes)
