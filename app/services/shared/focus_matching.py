@@ -15,7 +15,7 @@ def calculate_focus_fit_score(avg_focus_score: float, required_focus_level: str)
     if required_focus_level == "HIGH":
         return avg_focus_score
     if required_focus_level == "MEDIUM":
-        return avg_focus_score if avg_focus_score >= 60 else avg_focus_score - 20
+        return avg_focus_score if avg_focus_score >= 50 else avg_focus_score - 20
     if required_focus_level == "LOW":
         return 100 - avg_focus_score
     if required_focus_level == "FLEXIBLE":
