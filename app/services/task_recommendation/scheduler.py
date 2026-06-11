@@ -63,6 +63,7 @@ class RecommendedTask:
     name: str
     remainingMin: int
     recommendScore: float
+    deadlineUrgencyScore: int
     workloadUrgencyScore: int
     importanceScore: int
     isDueToday: bool
@@ -90,6 +91,7 @@ class _ScoredTask:
     due_date: date | None
     remaining_minutes: int
     recommend_score: float
+    deadline_urgency_score: int
     workload_urgency_score: int
     importance_score: int
     is_due_today: bool
@@ -100,7 +102,7 @@ class _ScoredTask:
 def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
     """미완료 태스크 중 targetDate에 수행할 태스크를 최대 4개 추천한다.
 
-    오늘 마감 태스크와 일반 태스크를 분리한 뒤 점수 순으로 추천한다.
+    오늘 마감 태스크를 먼저 선별한 뒤, 최종 응답은 추천 점수 순으로 정렬한다.
     """
 
     available_minutes = inp.availableMinutes
@@ -115,10 +117,8 @@ def recommend_tasks(inp: RecommendInput) -> RecommendOutput:
     )
     scored_tasks = [_score_task(task, inp.targetDate) for task in inp.tasks]
     candidates = [task for task in scored_tasks if task is not None]
-
     due_today = [task for task in candidates if task.is_due_today]
     general = [task for task in candidates if not task.is_due_today]
-    # 마감 태스크와 일반 태스크를 분리해, 추천 점수가 같아도 오늘 마감이 밀리지 않게 한다.
     due_today.sort(key=_candidate_sort_key)
     general.sort(key=_candidate_sort_key)
 
@@ -192,6 +192,33 @@ def workload_urgency_score(
     return 15
 
 
+def deadline_urgency_score(
+    due_date: date | datetime | None,
+    target_date: date,
+) -> int:
+    """마감일이 가까울수록 높은 점수를 부여한다."""
+
+    due_day = _to_date(due_date)
+    if due_day is None:
+        return 10
+
+    days_left = (due_day - target_date).days
+    if days_left < 0:
+        return 20
+    
+    if days_left == 0:
+        return 100
+    if days_left == 1:
+        return 85
+    if days_left == 2:
+        return 70
+    if days_left == 3:
+        return 50
+    if days_left <= 7:
+        return 30
+    return 15
+
+
 def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
     """추천 대상이 아닌 태스크를 걸러내고 정책 점수 기반 추천 점수를 만든다."""
 
@@ -207,9 +234,12 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         target_date,
     )
     task_importance_score = importance_score(task.importance)
-    # 추천 점수는 잔여 작업 압박과 중요도를 반영한다.
+    task_deadline_urgency_score = deadline_urgency_score(due_day, target_date)
+    # 추천 점수는 마감 임박도, 잔여 작업 압박, 중요도를 반영한다.
     recommend_score = round(
-        0.7 * task_workload_urgency_score + 0.3 * task_importance_score,
+        0.4 * task_deadline_urgency_score
+        + 0.4 * task_workload_urgency_score
+        + 0.2 * task_importance_score,
         1,
     )
 
@@ -218,6 +248,7 @@ def _score_task(task: CandidateTask, target_date: date) -> _ScoredTask | None:
         due_date=due_day,
         remaining_minutes=remaining_minutes,
         recommend_score=recommend_score,
+        deadline_urgency_score=task_deadline_urgency_score,
         workload_urgency_score=task_workload_urgency_score,
         importance_score=task_importance_score,
         is_due_today=is_due_today,
@@ -238,12 +269,11 @@ def _candidate_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, 
     )
 
 
-def _selected_sort_key(candidate: _ScoredTask) -> tuple[float, bool, date, int, int, int]:
-    """응답 순위 정렬 기준. 선택 이후에도 오늘 마감 태스크가 위에 보이도록 정렬한다."""
+def _selected_sort_key(candidate: _ScoredTask) -> tuple[float, date, int, int, int]:
+    """응답 순위 정렬 기준. 동점이면 마감일, 중요도, 짧은 작업 순으로 안정화한다."""
 
     return (
         -candidate.recommend_score,
-        not candidate.is_due_today,
         candidate.due_date or date.max,
         -candidate.importance_score,
         candidate.remaining_minutes,
@@ -265,6 +295,7 @@ def _to_recommended_task(
         name=candidate.task.name,
         remainingMin=candidate.remaining_minutes,
         recommendScore=candidate.recommend_score,
+        deadlineUrgencyScore=candidate.deadline_urgency_score,
         workloadUrgencyScore=candidate.workload_urgency_score,
         importanceScore=candidate.importance_score,
         isDueToday=candidate.is_due_today,

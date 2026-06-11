@@ -131,6 +131,7 @@ def recommend(req: RecommendRequest, request: Request):
                     name=item.name,
                     remainingMin=item.remainingMin,
                     recommendScore=item.recommendScore,
+                    deadlineUrgencyScore=item.deadlineUrgencyScore,
                     workloadUrgencyScore=item.workloadUrgencyScore,
                     importanceScore=item.importanceScore,
                     isDueToday=item.isDueToday,
