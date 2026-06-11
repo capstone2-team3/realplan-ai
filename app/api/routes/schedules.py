@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, HTTPException, Request
 
 from app.api.response import ApiResponse
 from app.schemas.auto_placement import AutoPlacementRequest, AutoPlacementResponse
 from app.services.schedule_auto_completion.auto_placement import auto_place_sessions
 
-logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
 
@@ -27,18 +24,6 @@ def auto_place(req: AutoPlacementRequest, request: Request):
     """
 
     try:
-        logger.info(
-            "자동 배치 요청 task 요약: %s",
-            [
-                {
-                    "taskId": task.taskId,
-                    "isDueToday": task.isDueToday,
-                    "recommendScore": task.recommendScore,
-                    "targetMinutes": task.targetMinutes,
-                }
-                for task in req.tasks
-            ],
-        )
         result = auto_place_sessions(req)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

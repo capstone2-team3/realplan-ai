@@ -69,6 +69,9 @@ class PlacementTask(BaseModel):
     taskId: int
     isDueToday: bool
     recommendScore: float
+    deadlineUrgencyScore: int | None = None
+    workloadUrgencyScore: int | None = None
+    importanceScore: int | None = None
     targetMinutes: int
     difficulty: TaskDifficulty
 

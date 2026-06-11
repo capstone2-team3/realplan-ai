@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 
 from app.api.response import ApiResponse, error_response
@@ -23,6 +26,7 @@ from app.services.task_registration.initial_estimator.estimation import estimate
 from app.services.task_recommendation.scheduler import CandidateTask, RecommendInput, recommend_tasks
 from app.services.schedule_auto_completion.task_decomposition import decompose_tasks
 
+logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
 
@@ -92,6 +96,10 @@ def estimate(req: EstimateRequest, request: Request):
 )
 def recommend(req: RecommendRequest, request: Request):
     """DB 조회 없이 요청으로 받은 후보 목록만 기준으로 오늘 수행할 태스크를 추천한다."""
+    logger.info(
+        "태스크 추천 요청 데이터:\n%s",
+        json.dumps(req.model_dump(mode="json"), ensure_ascii=False, indent=2),
+    )
     inp = RecommendInput(
         targetDate=req.targetDate,
         requestedAt=req.requestedAt,
@@ -117,6 +125,23 @@ def recommend(req: RecommendRequest, request: Request):
 
     try:
         result = recommend_tasks(inp)
+        logger.info(
+            "태스크 추천 점수 계산 결과:\n%s",
+            json.dumps(
+                [
+                    {
+                        "taskId": item.taskId,
+                        "recommendScore": item.recommendScore,
+                        "deadlineUrgencyScore": item.deadlineUrgencyScore,
+                        "workloadUrgencyScore": item.workloadUrgencyScore,
+                        "importanceScore": item.importanceScore,
+                    }
+                    for item in result.recommendations
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
