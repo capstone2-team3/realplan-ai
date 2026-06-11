@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+seed_demo_with_time_based,36,36,-24.7,55.11,22.77,2.79,2.79,1.33,52.32,94.94,21.44
