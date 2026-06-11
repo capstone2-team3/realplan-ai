@@ -17,9 +17,12 @@ Swagger UI: http://localhost:8000/docs
 
 | 키 | 설명 | 기본값 |
 |---|---|---|
-| `OPENAI_API_KEY` | OpenAI API 키 (필수, `/tasks/classify`, `/tasks/decompose`에서 사용) | — |
+| `OPENAI_API_KEY` | OpenAI API 키. 앱 시작 시 필수로 확인하며 `/tasks/classify`, `/tasks/decompose`에서 사용 | — |
+| `OPENAI_MODEL` | `/tasks/decompose`에서 사용할 OpenAI 모델 | `gpt-4.1-mini` |
+| `DEBUG_OPENAI_TASK_DECOMPOSITION` | `/tasks/decompose` OpenAI 원문 응답 디버그 로그 활성화 (`1`, `true`, `yes`, `on`) | 비활성 |
 
 분류용 기본 모델은 `app/services/task_registration/classifier/constants.py`에서 관리합니다.
+태스크 분할용 기본 모델은 `app/services/schedule_auto_completion/task_decomposition.py`에서 관리합니다.
 
 ## 엔드포인트
 
