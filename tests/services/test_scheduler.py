@@ -5,6 +5,7 @@ import pytest
 from app.services.task_recommendation.scheduler import (
     CandidateTask,
     RecommendInput,
+    deadline_urgency_score,
     filter_available_time_bands,
     importance_score,
     recommend_tasks,
@@ -73,7 +74,7 @@ def test_remaining_zero_is_excluded_even_if_due_today():
     assert response.message == "추천할 미완료 태스크가 없어요."
 
 
-def test_due_today_tasks_are_selected_before_general_tasks():
+def test_recommend_score_tie_uses_nearer_deadline():
     response = _recommend(
         [
             _task(1, due_date=TARGET_DATE, importance="low", remaining_minutes=60),
@@ -82,7 +83,7 @@ def test_due_today_tasks_are_selected_before_general_tasks():
         available_minutes=60,
     )
 
-    assert [item.taskId for item in response.recommendations] == [2, 1]
+    assert [item.taskId for item in response.recommendations] == [1, 2]
 
 
 def test_overdue_task_is_classified_as_general_task():
@@ -101,7 +102,7 @@ def test_overdue_task_is_classified_as_general_task():
     assert due_today.isDueToday is True
 
 
-def test_final_display_order_uses_recommend_score_after_selection():
+def test_final_display_order_uses_recommend_score_and_tie_breakers():
     response = _recommend(
         [
             _task(1, due_date=TARGET_DATE, importance="low", remaining_minutes=60),
@@ -109,8 +110,39 @@ def test_final_display_order_uses_recommend_score_after_selection():
         ]
     )
 
-    assert [item.taskId for item in response.recommendations] == [2, 1]
+    assert [item.taskId for item in response.recommendations] == [1, 2]
     assert [item.rank for item in response.recommendations] == [1, 2]
+
+
+def test_higher_scored_tomorrow_task_can_rank_before_due_today_task():
+    response = _recommend(
+        [
+            _task(1, due_date=date(2026, 5, 30), importance="high", remaining_minutes=240),
+            _task(2, due_date=TARGET_DATE, importance="medium", remaining_minutes=60),
+        ]
+    )
+
+    assert response.recommendations[0].taskId == 1
+    assert response.recommendations[0].recommendScore > response.recommendations[1].recommendScore
+
+
+def test_due_today_task_is_included_even_when_not_top_four_by_score():
+    response = _recommend(
+        [
+            _task(1, due_date=TARGET_DATE, importance="low", remaining_minutes=10),
+            _task(2, due_date=date(2026, 5, 30), importance="high", remaining_minutes=240),
+            _task(3, due_date=date(2026, 5, 31), importance="high", remaining_minutes=240),
+            _task(4, due_date=date(2026, 6, 1), importance="high", remaining_minutes=240),
+            _task(5, due_date=date(2026, 6, 2), importance="high", remaining_minutes=240),
+        ]
+    )
+
+    task_ids = [item.taskId for item in response.recommendations]
+    scores = [item.recommendScore for item in response.recommendations]
+
+    assert 1 in task_ids
+    assert 5 not in task_ids
+    assert scores == sorted(scores, reverse=True)
 
 
 def test_recommendations_are_limited_to_four():
@@ -348,15 +380,49 @@ def test_workload_urgency_score_policy():
     assert workload_urgency_score(60, date(2026, 5, 30), TARGET_DATE) == 30
 
 
-def test_recommend_score_uses_workload_urgency_and_importance():
+def test_deadline_urgency_score_policy():
+    assert deadline_urgency_score(None, TARGET_DATE) == 10
+    assert deadline_urgency_score(date(2026, 5, 28), TARGET_DATE) == 100
+    assert deadline_urgency_score(TARGET_DATE, TARGET_DATE) == 100
+    assert deadline_urgency_score(date(2026, 5, 30), TARGET_DATE) == 85
+    assert deadline_urgency_score(date(2026, 5, 31), TARGET_DATE) == 70
+    assert deadline_urgency_score(date(2026, 6, 1), TARGET_DATE) == 50
+    assert deadline_urgency_score(date(2026, 6, 5), TARGET_DATE) == 30
+    assert deadline_urgency_score(date(2026, 6, 6), TARGET_DATE) == 15
+
+
+def test_recommend_score_uses_deadline_workload_and_importance():
     response = _recommend(
         [_task(1, due_date=TARGET_DATE, importance="high", remaining_minutes=60)]
     )
 
     item = response.recommendations[0]
+    assert item.deadlineUrgencyScore == 100
     assert item.workloadUrgencyScore == 50
     assert item.importanceScore == 100
-    assert item.recommendScore == 65.0
+    assert item.recommendScore == 80.0
+
+
+def test_nearer_deadline_can_outrank_larger_distant_workload():
+    response = _recommend(
+        [
+            _task(
+                1,
+                due_date=date(2026, 5, 30),
+                importance="medium",
+                remaining_minutes=105,
+            ),
+            _task(
+                2,
+                due_date=date(2026, 6, 1),
+                importance="medium",
+                remaining_minutes=260,
+            ),
+        ]
+    )
+
+    assert [item.taskId for item in response.recommendations] == [1, 2]
+    assert response.recommendations[0].recommendScore > response.recommendations[1].recommendScore
 
 
 def test_invalid_available_minutes_raises_value_error():
