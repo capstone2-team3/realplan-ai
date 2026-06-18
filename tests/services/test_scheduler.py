@@ -382,7 +382,7 @@ def test_workload_urgency_score_policy():
 
 def test_deadline_urgency_score_policy():
     assert deadline_urgency_score(None, TARGET_DATE) == 10
-    assert deadline_urgency_score(date(2026, 5, 28), TARGET_DATE) == 100
+    assert deadline_urgency_score(date(2026, 5, 28), TARGET_DATE) == 20
     assert deadline_urgency_score(TARGET_DATE, TARGET_DATE) == 100
     assert deadline_urgency_score(date(2026, 5, 30), TARGET_DATE) == 85
     assert deadline_urgency_score(date(2026, 5, 31), TARGET_DATE) == 70

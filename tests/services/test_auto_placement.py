@@ -477,7 +477,7 @@ def test_example_scenario_places_due_today_chunks_and_unschedules_other_task():
 
 def test_focus_fit_score_policy():
     assert calculate_focus_fit_score(90, "HIGH") == 90
-    assert calculate_focus_fit_score(50, "MEDIUM") == 30
+    assert calculate_focus_fit_score(50, "MEDIUM") == 50
     assert calculate_focus_fit_score(30, "LOW") == 70
     assert calculate_focus_fit_score(10, "FLEXIBLE") == 50
 

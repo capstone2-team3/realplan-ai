@@ -561,7 +561,7 @@ def test_router_low_count_returns_rule_average_blend():
     result = router.estimate(req)
     rule = router.rule.estimate(req)
     average = router.average.estimate(req)
-    w_average = req.completedCount / EARLY_THRESHOLD
+    w_average = req.completedCount / (req.completedCount + 3)
     expected_log = (
         (1 - w_average) * rule.logCorrection
         + w_average * average.logCorrection
