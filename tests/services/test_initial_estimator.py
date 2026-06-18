@@ -232,8 +232,8 @@ def test_time_based_estimate_negative_residual_is_floored():
 # ---------- update -----------------------------------------------------
 
 
-def test_update_returns_new_global_and_residual():
-    """update 후 userGlobal/userTypeResidual EMA가 정확히 반영된다."""
+def test_update_zero_user_global_uses_system_prior():
+    """userGlobal=0이면 미저장 값으로 보고 systemGlobalPrior를 기준값으로 사용한다."""
     stage = AverageBaselineStage()
     req = _make_update_request(
         estimatedMinutes=60.0,
@@ -253,10 +253,10 @@ def test_update_returns_new_global_and_residual():
 
     log_ratio = math.log(90.0 / 60.0)
     clamped = max(CLAMP_MIN, min(CLAMP_MAX, log_ratio))
-    expected_global = (1 - ETA_GLOBAL) * 0.0 + ETA_GLOBAL * clamped
+    expected_global = (1 - ETA_GLOBAL) * SYSTEM_GLOBAL + ETA_GLOBAL * clamped
     residual_target = (
         clamped
-        - 0.0
+        - SYSTEM_GLOBAL
         - SYSTEM_TYPE["SATISFACTION_BASED"]
         - SYSTEM_DIFFICULTY["MEDIUM"]
     )
@@ -342,6 +342,21 @@ def test_update_new_user_uses_system_prior_as_userglobal_old():
     result = stage.update(req)
 
     expected_global = (1 - ETA_GLOBAL) * SYSTEM_GLOBAL + ETA_GLOBAL * 0.0
+    assert math.isclose(result.userGlobal, expected_global, rel_tol=1e-9)
+
+
+def test_update_existing_nonzero_user_global_is_preserved_as_old_value():
+    """userGlobal이 0이 아닌 값이면 기존 사용자 계수로 EMA에 반영한다."""
+    stage = AverageBaselineStage()
+    req = _make_update_request(
+        estimatedMinutes=60.0,
+        actualMinutes=90.0,
+        userGlobal=0.2,
+    )
+    result = stage.update(req)
+
+    clamped = clamp_log_ratio(math.log(90.0 / 60.0))
+    expected_global = (1 - ETA_GLOBAL) * 0.2 + ETA_GLOBAL * clamped
     assert math.isclose(result.userGlobal, expected_global, rel_tol=1e-9)
 
 

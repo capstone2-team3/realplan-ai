@@ -36,6 +36,13 @@ from app.services.task_registration.initial_estimator.update_policy import (
 logger = logging.getLogger(__name__)
 
 
+def _fallback_user_global(user_global: float | None, system_global_prior: float) -> float:
+    """userGlobal이 비어 있거나 0이면 시스템 prior를 기준값으로 사용한다."""
+    if user_global is None or user_global == 0:
+        return system_global_prior
+    return user_global
+
+
 class AverageBaselineStage(PlanningStage):
     """safe user global, system effect, 사용자 type/difficulty/folder residual baseline."""
 
@@ -120,9 +127,7 @@ class AverageBaselineStage(PlanningStage):
                 reason=drop_reason or "dropped by ratio policy",
             )
 
-        user_global_old = (
-            req.userGlobal if req.userGlobal is not None else req.systemGlobalPrior
-        )
+        user_global_old = _fallback_user_global(req.userGlobal, req.systemGlobalPrior)
         user_global_new = (
             (1 - ETA_GLOBAL) * user_global_old
             + ETA_GLOBAL * clamped_log_ratio
@@ -199,9 +204,7 @@ class AverageBaselineStage(PlanningStage):
     ) -> UpdateResponse:
         logger.warning("[Drop] reason=%s taskType=%s", reason, req.taskType)
         return UpdateResponse(
-            userGlobal=(
-                req.userGlobal if req.userGlobal is not None else req.systemGlobalPrior
-            ),
+            userGlobal=_fallback_user_global(req.userGlobal, req.systemGlobalPrior),
             userTypeResidual=dict(req.userTypeResidual or {}),
             userDifficultyResidual=dict(req.userDifficultyResidual or {}),
             userFolderResidual=dict(req.userFolderResidual or {}),

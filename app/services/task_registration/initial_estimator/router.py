@@ -43,7 +43,8 @@ class PlanningRouter:
         if completed < EARLY_THRESHOLD:
             rule_result = self.rule.estimate(req)
             average_result = self.average.estimate(req)
-            w_average = completed / EARLY_THRESHOLD
+            # w_average = completed / EARLY_THRESHOLD
+            w_average = completed / (completed + 3)
             w_rule = 1 - w_average
             blended_log = (
                 w_rule * rule_result.logCorrection

@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+nayoung_exp04_router_personalization,5,5,-167.72,172.72,38.85,2.33,2.33,1.09,170.39,98.65,37.76

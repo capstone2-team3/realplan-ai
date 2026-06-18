@@ -2,18 +2,18 @@
   "experiment": "sejin_dummy_30",
   "user_id": 1,
   "user_name": "세진",
-  "system_global_prior": 0.44468582126144574,
-  "system_global_prior_ratio": 1.56,
+  "system_global_prior": 0.4054651081081644,
+  "system_global_prior_ratio": 1.5,
   "system_type_effect": {
     "TIME_BASED": 0.0,
-    "QUANTITY_BASED": -0.071,
-    "SATISFACTION_BASED": 0.262
+    "QUANTITY_BASED": 0.0,
+    "SATISFACTION_BASED": 0.1823215567939546
   },
   "system_difficulty_effect": {
-    "LOW": -0.05,
-    "MEDIUM": -0.022,
-    "HIGH": -0.031,
-    "UNKNOWN": 0.204
+    "LOW": -0.06899287148695156,
+    "MEDIUM": 0.0,
+    "HIGH": 0.06453852113757116,
+    "UNKNOWN": 0.09531017980432474
   },
   "folder_id_map": {
     "기본 폴더": "1",
@@ -23,5 +23,6 @@
     "보안": "5",
     "운영체제": "6",
     "멀코컴": "7"
-  }
+  },
+  "task_order_basis": "first session with progress_percent >= 100, ordered by ended_at"
 }

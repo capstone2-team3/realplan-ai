@@ -64,34 +64,35 @@ except ModuleNotFoundError as exc:
 #    baseline은 모두 0.0으로 둔다. 실험별로 이 값만 변경하면 된다.
 # -----------------------------------------------------------------------------
 
-# SYSTEM_GLOBAL_PRIOR = 0.0
-
-# SYSTEM_TYPE_EFFECT = {
-#     "TIME_BASED": 0.0,
-#     "QUANTITY_BASED": 0.0,
-#     "SATISFACTION_BASED": 0.0,
-# }
-
-# SYSTEM_DIFFICULTY_EFFECT = {
-#     "LOW": 0.0,
-#     "MEDIUM": 0.0,
-#     "HIGH": 0.0,
-#     "UNKNOWN": 0.0,
-# }
-SYSTEM_GLOBAL_PRIOR = 0.4447
+SYSTEM_GLOBAL_PRIOR = 0.0
 
 SYSTEM_TYPE_EFFECT = {
     "TIME_BASED": 0.000,
-    "QUANTITY_BASED": -0.071,
-    "SATISFACTION_BASED": 0.262,
+    "QUANTITY_BASED": 0.000,
+    "SATISFACTION_BASED": 0.0
 }
 
 SYSTEM_DIFFICULTY_EFFECT = {
-    "LOW": -0.050,
-    "MEDIUM": -0.022,
-    "HIGH": -0.031,
-    "UNKNOWN": 0.204,
+    "LOW": 0.0,
+    "MEDIUM": 0.000,
+    "HIGH": 0.0,
+    "UNKNOWN": 0.0
 }
+
+# SYSTEM_GLOBAL_PRIOR = math.log(1.50)
+
+# SYSTEM_TYPE_EFFECT = {
+#     "TIME_BASED": 0.000,
+#     "QUANTITY_BASED": 0.000,
+#     "SATISFACTION_BASED": math.log(1.80 / 1.50),
+# }
+
+# SYSTEM_DIFFICULTY_EFFECT = {
+#     "LOW": math.log(1.40 / 1.50),
+#     "MEDIUM": 0.000,
+#     "HIGH": math.log(1.60 / 1.50),
+#     "UNKNOWN": math.log(1.65 / 1.50),
+# }
 
 
 # -----------------------------------------------------------------------------

@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+nayoung_exp05_eta_learning_rate,5,5,-166.57,172.87,39.23,2.37,2.37,1.14,170.5,98.63,38.09

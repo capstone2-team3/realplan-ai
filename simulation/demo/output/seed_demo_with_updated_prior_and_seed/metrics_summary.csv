@@ -1,0 +1,2 @@
+﻿experiment,task_count_initial,task_count_last,initial_bias,initial_mae,initial_mape,last_bias,last_mae,last_mape,mae_improvement_minutes,mae_improvement_percent,mape_improvement_points
+demo_system_initial,36,36,-27.14,55.93,22.12,2.82,2.82,1.34,53.11,94.96,20.78
