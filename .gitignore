@@ -1,10 +1,21 @@
-# Python-generated files
+# 환경변수
+.env
+
+# Python
 __pycache__/
-*.py[oc]
+*.pyc
+
 build/
 dist/
 wheels/
 *.egg-info
 
-# Virtual environments
-.venv
+.pytest_cache/
+
+# uv가 만드는 가상환경
+.venv/
+
+CLAUDE.md
+AGENTS.md
+
+.DS_Store
